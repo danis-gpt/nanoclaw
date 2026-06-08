@@ -90,30 +90,43 @@ onecli secrets list | grep -i vercel
 OneCLI uses selective secret mode — secrets must be explicitly assigned to each agent. Get the Vercel secret ID from the output above, then assign it to every agent:
 
 ```bash
-# For each agent, add the Vercel secret to its assigned secrets list.
-# First get current assignments, then set them with the new secret appended.
-VERCEL_SECRET_ID=$(onecli secrets list 2>/dev/null | grep -B2 "Vercel" | grep '"id"' | head -1 | sed 's/.*"id": "//;s/".*//')
-for agent in $(onecli agents list 2>/dev/null | grep '"id"' | sed 's/.*"id": "//;s/".*//'); do
-  CURRENT=$(onecli agents secrets --id "$agent" 2>/dev/null | grep '"' | grep -v hint | grep -v data | sed 's/.*"//;s/".*//' | tr '\n' ',' | sed 's/,$//')
-  onecli agents set-secrets --id "$agent" --secret-ids "${CURRENT:+$CURRENT,}$VERCEL_SECRET_ID"
+# set-secrets replaces the entire list — read and merge for each agent.
+VERCEL_SECRET_ID=$(onecli secrets list | jq -r '.data[] | select(.name | test("(?i)vercel")) | .id' | head -1)
+for agent in $(onecli agents list | jq -r '.data[].id'); do
+  CURRENT=$(onecli agents secrets --id "$agent" | jq -r '[.data[]] | join(",")')
+  MERGED=$(printf '%s' "$CURRENT,$VERCEL_SECRET_ID" | tr ',' '\n' | sort -u | paste -sd ',' -)
+  onecli agents set-secrets --id "$agent" --secret-ids "$MERGED"
 done
 ```
 
 ## Phase 4: Ensure Vercel CLI in Container Image
 
-Check if `vercel` is already in the Dockerfile:
+The Vercel CLI is installed globally in the agent image via `container/Dockerfile`. Check for both halves of the install — the pinned version arg and the install line:
 
 ```bash
-grep -q 'vercel' container/Dockerfile && echo "PRESENT" || echo "MISSING"
+grep -Eq '^ARG VERCEL_VERSION=' container/Dockerfile && \
+  grep -Eq 'pnpm install -g "?vercel@\$\{VERCEL_VERSION\}"?' container/Dockerfile && \
+  echo "PRESENT" || echo "MISSING"
 ```
 
-If `MISSING`, add `vercel` to the global npm install line in `container/Dockerfile`, then rebuild:
+If `MISSING`, add a pinned `ARG VERCEL_VERSION=52.2.1` near the other version args and a `pnpm install -g "vercel@${VERCEL_VERSION}"` step in the global-install block of `container/Dockerfile`, then rebuild the image:
 
 ```bash
 ./container/build.sh
 ```
 
-If `PRESENT`, skip — no rebuild needed.
+If `PRESENT`, the CLI is already in the image — skip the rebuild.
+
+## Phase 4b: Copy and Run the Dependency Guard
+
+The Vercel CLI is a globally-installed binary — not importable or typed — so a structural test guards the Dockerfile install. Copy it into the host test tree and run it:
+
+```bash
+cp .claude/skills/add-vercel/vercel-dockerfile.test.ts src/vercel-dockerfile.test.ts
+pnpm exec vitest run src/vercel-dockerfile.test.ts
+```
+
+The test parses `container/Dockerfile` and asserts both the `ARG VERCEL_VERSION=...` and the `pnpm install -g "vercel@${VERCEL_VERSION}"` line are present. It goes red if either is dropped or drifts.
 
 ## Phase 5: Sync Skills to Running Agent Groups
 
