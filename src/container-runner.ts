@@ -13,6 +13,7 @@ import {
   CONTAINER_IMAGE,
   CONTAINER_IMAGE_BASE,
   CONTAINER_INSTALL_LABEL,
+  CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
   ONECLI_API_KEY,
@@ -423,6 +424,13 @@ async function buildContainerArgs(
 ): Promise<string[]> {
   const args: string[] = ['run', '--rm', '--name', containerName, '--label', CONTAINER_INSTALL_LABEL];
 
+  // Podman rootless: map host UID into container so volume mounts are writable
+  // Use host network so container can reach credential proxy on localhost.
+  if (CONTAINER_RUNTIME_BIN === 'podman') {
+    args.push('--userns', 'keep-id');
+    args.push('--network', 'host');
+  }
+
   // Environment — only vars read by code we don't own.
   // Everything NanoClaw-specific is in container.json (read by runner at startup).
   args.push('-e', `TZ=${TIMEZONE}`);
@@ -434,24 +442,41 @@ async function buildContainerArgs(
     }
   }
 
-  // OneCLI gateway — injects HTTPS_PROXY + certs so container API calls
-  // are routed through the agent vault for credential injection.
-  try {
-    if (agentIdentifier) {
-      await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
+  const usesCodexProvider = provider === 'codex';
+  if (!usesCodexProvider) {
+    // OneCLI gateway injects HTTPS_PROXY + certs so Claude-compatible API
+    // calls are routed through the agent vault for credential injection.
+    try {
+      if (agentIdentifier) {
+        await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
+      }
+      const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
+      if (onecliApplied) {
+        log.info('OneCLI gateway applied', { containerName });
+      } else {
+        log.warn('OneCLI gateway not applied — container will have no credentials', { containerName });
+      }
+    } catch (err) {
+      log.warn('OneCLI gateway error — container will have no credentials', { containerName, err });
     }
-    const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
-    if (onecliApplied) {
-      log.info('OneCLI gateway applied', { containerName });
-    } else {
-      log.warn('OneCLI gateway not applied — container will have no credentials', { containerName });
-    }
-  } catch (err) {
-    log.warn('OneCLI gateway error — container will have no credentials', { containerName, err });
+  } else {
+    log.info('OneCLI gateway skipped for Codex provider', { containerName });
   }
 
   // Host gateway
   args.push(...hostGatewayArgs());
+
+  if (!usesCodexProvider) {
+    // Route API traffic through the credential proxy (injects real keys + rewrites models).
+    const containerHostGateway = CONTAINER_RUNTIME_BIN === 'podman' ? 'localhost' : 'docker-host';
+    // Ensure SDK bypasses OneCLI proxy for localhost (credential proxy).
+    args.push('-e', 'NO_PROXY=localhost,127.0.0.1');
+    args.push('-e', 'no_proxy=localhost,127.0.0.1');
+    args.push('-e', `ANTHROPIC_BASE_URL=http://${containerHostGateway}:${CREDENTIAL_PROXY_PORT}`);
+    // SDK requires API key to be present (checks before making requests).
+    // Proxy will inject the real key; this is just a placeholder.
+    args.push('-e', 'ANTHROPIC_API_KEY=sk-placeholder-proxy-will-inject-real-key');
+  }
 
   // User mapping
   const hostUid = process.getuid?.();

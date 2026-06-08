@@ -32,6 +32,8 @@ Run `/update-nanoclaw` in Claude Code.
 
 **Validation**: runs `pnpm run build` and `pnpm test`.
 
+**Local Podman deployment**: if this checkout is the `a69a3d76` rootless Podman install, restarts the user-level systemd services after validation. If the host container image definition changed, rebuilds `localhost/nanoclaw-host-a69a3d76:latest` first.
+
 **Breaking changes check**: after validation, reads CHANGELOG.md for any `[BREAKING]` entries introduced by the update. If found, shows each breaking change and offers to run the recommended skill to migrate.
 
 ## Rollback
@@ -184,6 +186,50 @@ If build fails:
 - Do not refactor unrelated code.
 - If unclear, ask the user before making changes.
 
+## Local deployment note: rootless Podman/systemd install
+
+This server is a customized rootless Podman deployment. Detect it by the presence of:
+- `.config/systemd user services` named `nanoclaw-v2-a69a3d76.service` and `nanoclaw-codex-broker-a69a3d76.service`
+- `ops/podman-host/Containerfile`
+- host image name `localhost/nanoclaw-host-a69a3d76:latest`
+
+For this install, validation is not the end of the update. After `pnpm run build` and tests:
+
+1. Check whether the host image needs rebuilding:
+   ```bash
+   git diff --name-only <backup-tag-from-step-1>..HEAD -- ops/podman-host/Containerfile
+   ```
+2. If that command prints `ops/podman-host/Containerfile`, rebuild the host image:
+   ```bash
+   podman build -t localhost/nanoclaw-host-a69a3d76:latest -f ops/podman-host/Containerfile .
+   ```
+3. Restart the broker first, then the main host service:
+   ```bash
+   systemctl --user restart nanoclaw-codex-broker-a69a3d76.service
+   systemctl --user restart nanoclaw-v2-a69a3d76.service
+   ```
+4. Health-check:
+   ```bash
+   systemctl --user is-active nanoclaw-codex-broker-a69a3d76.service nanoclaw-v2-a69a3d76.service
+   podman ps --format '{{.Names}} {{.Status}}' | sed -n '/nanoclaw/p'
+   tail -n 120 logs/nanoclaw.log | rg 'Telegram bot bridge started|NanoClaw running|alias="aura"|alias="radar"|alias="vektor"'
+   ```
+
+If either service is not active, do not keep retrying blindly. Inspect:
+- `logs/nanoclaw.error.log`
+- `logs/codex-broker.error.log`
+- `systemctl --user status <service>`
+
+For rollback on this install, first reset the git checkout to the backup tag, rebuild if needed, then restart both services:
+```bash
+git reset --hard <backup-tag-from-step-1>
+pnpm install --frozen-lockfile
+pnpm run build
+podman build -t localhost/nanoclaw-host-a69a3d76:latest -f ops/podman-host/Containerfile .
+systemctl --user restart nanoclaw-codex-broker-a69a3d76.service
+systemctl --user restart nanoclaw-v2-a69a3d76.service
+```
+
 # Step 6: Breaking changes check
 After validation succeeds, check if the update introduced any breaking changes.
 
@@ -235,6 +281,11 @@ Tell the user:
 - Restart the service to apply changes:
   - If using launchd: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist && launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist`
   - If running manually: restart `pnpm run dev`
+  - If using this server's rootless Podman install:
+    ```bash
+    systemctl --user restart nanoclaw-codex-broker-a69a3d76.service
+    systemctl --user restart nanoclaw-v2-a69a3d76.service
+    ```
 
 
 ## Diagnostics

@@ -6,7 +6,8 @@
  */
 import path from 'path';
 
-import { DATA_DIR } from './config.js';
+import { DATA_DIR, CREDENTIAL_PROXY_PORT } from './config.js';
+import { startCredentialProxy, detectAuthMode } from './credential-proxy.js';
 import { migrateGroupsToClaudeLocal } from './claude-md-compose.js';
 import { initDb } from './db/connection.js';
 import { runMigrations } from './db/migrations/index.js';
@@ -67,7 +68,12 @@ async function main(): Promise<void> {
   // 1b. One-time filesystem cutover — idempotent, no-op after first run.
   migrateGroupsToClaudeLocal();
 
-  // 2. Container runtime
+  // 2. Credential proxy (injects real API keys into container requests)
+  const proxyAuthMode = detectAuthMode();
+  await startCredentialProxy(CREDENTIAL_PROXY_PORT);
+  log.info('Credential proxy started', { port: CREDENTIAL_PROXY_PORT, authMode: proxyAuthMode });
+
+  // 3. Container runtime
   ensureContainerRuntimeRunning();
   cleanupOrphans();
 

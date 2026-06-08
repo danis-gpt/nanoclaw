@@ -17,6 +17,18 @@ If you are a fresh install (you ran `git clone`, not `git pull`) and there are n
 
 Personal Claude assistant. See [README.md](README.md) for philosophy and setup. Architecture lives in `docs/`.
 
+## Operational Memory
+
+As of 2026-05-22, this server runs NanoClaw v2 host processes inside rootless Podman containers managed by user-level systemd:
+
+- `nanoclaw-v2-a69a3d76.service` runs container `nanoclaw-v2-a69a3d76` with `node dist/index.js`.
+- `nanoclaw-codex-broker-a69a3d76.service` runs container `nanoclaw-codex-broker-a69a3d76` with `node dist/codex-broker.js`.
+- Both services are enabled and active under `systemctl --user`; `loginctl show-user ubuntu` reports `Linger=yes`.
+- Containers use `--network host` and bind mount `/home/ubuntu/pr`, `/run/user/1000`, `/home/ubuntu/.codex`, `/home/ubuntu/.config/nanoclaw`, `/home/ubuntu/.ssh`, and `/home/ubuntu/.gitconfig`.
+- Important sockets/ports: Podman socket `/run/user/1000/podman/podman.sock`, Codex broker socket `/run/user/1000/nanoclaw-codex-broker-a69a3d76.sock`, webhook `127.0.0.1:3000`, credential proxy `127.0.0.1:3001`.
+- Telegram traffic was confirmed working after the Podman move: inbound messages routed, Codex broker queries completed, and Telegram replies were delivered.
+- Updates use the local `/update-nanoclaw` skill, adapted for this Podman install: git preflight/backup/merge/build/test, rebuild `localhost/nanoclaw-host-a69a3d76:latest` only if `ops/podman-host/Containerfile` changed, then restart `nanoclaw-codex-broker-a69a3d76.service` followed by `nanoclaw-v2-a69a3d76.service` and health-check logs for Telegram bridge aliases `aura`, `radar`, `vektor`.
+
 ## Quick Context
 
 The host is a single Node process that orchestrates per-session agent containers. Platform messages land via channel adapters, route through an entity model (users → messaging groups → agent groups → sessions), get written into the session's inbound DB, and wake a container. The agent-runner inside the container polls the DB, calls Claude, and writes back to the outbound DB. The host polls the outbound DB and delivers through the same adapter.

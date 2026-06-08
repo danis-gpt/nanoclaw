@@ -9,13 +9,16 @@ import { CONTAINER_INSTALL_LABEL } from './config.js';
 import { log } from './log.js';
 
 /** The container runtime binary name. */
-export const CONTAINER_RUNTIME_BIN = 'docker';
+export const CONTAINER_RUNTIME_BIN = 'podman';
 
 /** CLI args needed for the container to resolve the host gateway. */
 export function hostGatewayArgs(): string[] {
-  // On Linux, host.docker.internal isn't built-in — add it explicitly
+  if (CONTAINER_RUNTIME_BIN === 'podman') {
+    return [];
+  }
+  // Podman rootless: host.containers.internal resolves via slirp4netns/pasta
   if (os.platform() === 'linux') {
-    return ['--add-host=host.docker.internal:host-gateway'];
+    return ['--add-host=host.containers.internal:host-gateway'];
   }
   return [];
 }

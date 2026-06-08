@@ -69,9 +69,14 @@ export interface AgentQuery {
   abort(): void;
 }
 
+export interface ProviderFile {
+  filename: string;
+  dataBase64: string;
+}
+
 export type ProviderEvent =
   | { type: 'init'; continuation: string }
-  | { type: 'result'; text: string | null }
+  | { type: 'result'; text: string | null; files?: ProviderFile[] }
   | { type: 'error'; message: string; retryable: boolean; classification?: string }
   | { type: 'progress'; message: string }
   /**

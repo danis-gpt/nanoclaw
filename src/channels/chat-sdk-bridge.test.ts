@@ -3,9 +3,19 @@ import { describe, expect, it } from 'vitest';
 import type { Adapter } from 'chat';
 
 import { createChatSdkBridge, splitForLimit } from './chat-sdk-bridge.js';
+import type { OutboundFile } from './adapter.js';
 
 function stubAdapter(partial: Partial<Adapter>): Adapter {
   return { name: 'stub', ...partial } as unknown as Adapter;
+}
+
+type PostedPayload = {
+  markdown?: string;
+  files?: Array<{ filename: string; data: Buffer }>;
+};
+
+function file(filename: string): OutboundFile {
+  return { filename, data: Buffer.from(filename) };
 }
 
 describe('splitForLimit', () => {
@@ -76,5 +86,60 @@ describe('createChatSdkBridge', () => {
       supportsThreads: true,
     });
     expect(typeof bridge.subscribe).toBe('function');
+  });
+
+  it('splits multiple outbound files into one Chat SDK post per file when text is present', async () => {
+    const posts: Array<{ tid: string; payload: PostedPayload }> = [];
+    const bridge = createChatSdkBridge({
+      adapter: stubAdapter({
+        postMessage: (async (tid: string, payload: PostedPayload) => {
+          posts.push({ tid, payload });
+          return { id: `msg-${posts.length}` };
+        }) as Adapter['postMessage'],
+      }),
+      supportsThreads: false,
+    });
+
+    const firstId = await bridge.deliver('stub:chat-1', null, {
+      kind: 'message',
+      content: { text: 'Here are the files' },
+      files: [file('one.png'), file('two.png'), file('three.png')],
+    });
+
+    expect(firstId).toBe('msg-1');
+    expect(posts).toHaveLength(3);
+    expect(posts.map((post) => post.tid)).toEqual(['stub:chat-1', 'stub:chat-1', 'stub:chat-1']);
+    expect(posts.map((post) => post.payload.markdown)).toEqual(['Here are the files', '', '']);
+    expect(posts.map((post) => post.payload.files?.map((f) => f.filename))).toEqual([
+      ['one.png'],
+      ['two.png'],
+      ['three.png'],
+    ]);
+    expect(posts.every((post) => (post.payload.files?.length ?? 0) <= 1)).toBe(true);
+  });
+
+  it('splits multiple file-only outbound messages into one Chat SDK post per file', async () => {
+    const posts: PostedPayload[] = [];
+    const bridge = createChatSdkBridge({
+      adapter: stubAdapter({
+        postMessage: (async (_tid: string, payload: PostedPayload) => {
+          posts.push(payload);
+          return { id: `file-${posts.length}` };
+        }) as Adapter['postMessage'],
+      }),
+      supportsThreads: false,
+    });
+
+    const firstId = await bridge.deliver('stub:chat-1', null, {
+      kind: 'message',
+      content: {},
+      files: [file('first.pdf'), file('second.pdf')],
+    });
+
+    expect(firstId).toBe('file-1');
+    expect(posts).toHaveLength(2);
+    expect(posts.map((post) => post.markdown)).toEqual(['', '']);
+    expect(posts.map((post) => post.files?.map((f) => f.filename))).toEqual([['first.pdf'], ['second.pdf']]);
+    expect(posts.every((post) => (post.files?.length ?? 0) === 1)).toBe(true);
   });
 });

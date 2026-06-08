@@ -1,0 +1,28 @@
+FROM docker.io/library/node:22-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    git \
+    openssh-client \
+    podman \
+    procps \
+    ripgrep \
+    tini \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g @openai/codex@0.133.0
+
+RUN mkdir -p /home/ubuntu && chown 1000:1000 /home/ubuntu
+
+USER 1000:1000
+ENV HOME=/home/ubuntu
+ENV XDG_RUNTIME_DIR=/run/user/1000
+ENV CONTAINER_HOST=unix:///run/user/1000/podman/podman.sock
+ENV PATH=/usr/local/bin:/usr/bin:/bin:/home/ubuntu/.local/bin:/home/ubuntu/.local/share/pnpm
+
+WORKDIR /home/ubuntu/pr/nanoclaw1/nanoclaw-v2
+
+ENTRYPOINT ["/usr/bin/tini", "--"]

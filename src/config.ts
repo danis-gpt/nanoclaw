@@ -6,7 +6,19 @@ import { getContainerImageBase, getDefaultContainerImage, getInstallSlug } from 
 import { isValidTimezone } from './timezone.js';
 
 // Read config values from .env (falls back to process.env).
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER', 'ONECLI_URL', 'ONECLI_API_KEY', 'TZ']);
+const envConfig = readEnvFile([
+  'ASSISTANT_NAME',
+  'ASSISTANT_HAS_OWN_NUMBER',
+  'ONECLI_URL',
+  'ONECLI_API_KEY',
+  'CREDENTIAL_PROXY_PORT',
+  'TZ',
+  'CODEX_DEFAULT_MODEL',
+  'CODEX_ESCALATION_MODEL',
+  'CODEX_AUTO_ESCALATION',
+  'CODEX_AUTO_ESCALATION_MIN_SCORE',
+  'CODEX_AUTO_ESCALATION_LONG_PROMPT_CHARS',
+]);
 
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
 export const ASSISTANT_HAS_OWN_NUMBER =
@@ -35,6 +47,33 @@ export const CONTAINER_TIMEOUT = parseInt(process.env.CONTAINER_TIMEOUT || '1800
 export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760', 10); // 10MB default
 export const ONECLI_URL = process.env.ONECLI_URL || envConfig.ONECLI_URL;
 export const ONECLI_API_KEY = process.env.ONECLI_API_KEY || envConfig.ONECLI_API_KEY;
+export const CREDENTIAL_PROXY_PORT = parseInt(
+  process.env.CREDENTIAL_PROXY_PORT || envConfig.CREDENTIAL_PROXY_PORT || '3001',
+  10,
+);
+export const CODEX_DEFAULT_MODEL = process.env.CODEX_DEFAULT_MODEL || envConfig.CODEX_DEFAULT_MODEL || 'gpt-5.3-codex';
+export const CODEX_ESCALATION_MODEL =
+  process.env.CODEX_ESCALATION_MODEL || envConfig.CODEX_ESCALATION_MODEL || 'auto-frontier';
+export const CODEX_AUTO_ESCALATION =
+  (process.env.CODEX_AUTO_ESCALATION || envConfig.CODEX_AUTO_ESCALATION || 'true') !== 'false';
+export const CODEX_AUTO_ESCALATION_MIN_SCORE = Math.max(
+  1,
+  parseInt(process.env.CODEX_AUTO_ESCALATION_MIN_SCORE || envConfig.CODEX_AUTO_ESCALATION_MIN_SCORE || '3', 10) || 3,
+);
+export const CODEX_AUTO_ESCALATION_LONG_PROMPT_CHARS = Math.max(
+  1000,
+  parseInt(
+    process.env.CODEX_AUTO_ESCALATION_LONG_PROMPT_CHARS || envConfig.CODEX_AUTO_ESCALATION_LONG_PROMPT_CHARS || '20000',
+    10,
+  ) || 20000,
+);
+export const CODEX_BROKER_SOCKET =
+  process.env.CODEX_BROKER_SOCKET ||
+  path.join(
+    process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid?.() ?? 1000}`,
+    `nanoclaw-codex-broker-${INSTALL_SLUG}.sock`,
+  );
+export const CODEX_BROKER_GRANTS_DIR = path.join(DATA_DIR, 'codex-broker', 'grants');
 export const MAX_MESSAGES_PER_PROMPT = Math.max(1, parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10);
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(1, parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5);

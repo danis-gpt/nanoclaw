@@ -415,14 +415,21 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
             ? splitForLimit(text, config.maxTextLength)
             : [text];
         let firstId: string | undefined;
-        for (let i = 0; i < chunks.length; i++) {
-          const chunk = chunks[i];
-          const attachFiles = i === 0 && fileUploads && fileUploads.length > 0;
-          const result = await adapter.postMessage(
-            tid,
-            attachFiles ? { markdown: chunk, files: fileUploads } : { markdown: chunk },
-          );
-          if (i === 0) firstId = result?.id;
+        if (fileUploads && fileUploads.length > 0) {
+          const [firstFile, ...remainingFiles] = fileUploads;
+          const firstResult = await adapter.postMessage(tid, { markdown: chunks[0], files: [firstFile] });
+          firstId = firstResult?.id;
+          for (let i = 1; i < chunks.length; i++) {
+            await adapter.postMessage(tid, { markdown: chunks[i] });
+          }
+          for (const file of remainingFiles) {
+            await adapter.postMessage(tid, { markdown: '', files: [file] });
+          }
+        } else {
+          for (let i = 0; i < chunks.length; i++) {
+            const result = await adapter.postMessage(tid, { markdown: chunks[i] });
+            if (i === 0) firstId = result?.id;
+          }
         }
         return firstId;
       } else if (message.files && message.files.length > 0) {
@@ -431,8 +438,12 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           data: f.data,
           filename: f.filename,
         }));
-        const result = await adapter.postMessage(tid, { markdown: '', files: fileUploads });
-        return result?.id;
+        let firstId: string | undefined;
+        for (const file of fileUploads) {
+          const result = await adapter.postMessage(tid, { markdown: '', files: [file] });
+          firstId ??= result?.id;
+        }
+        return firstId;
       }
     },
 

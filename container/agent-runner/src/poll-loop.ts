@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+
 import { findByName, getAllDestinations, type DestinationEntry } from './destinations.js';
 import { getPendingMessages, markProcessing, markCompleted, type MessageInRow } from './db/messages-in.js';
 import { writeMessageOut } from './db/messages-out.js';
@@ -8,7 +11,7 @@ import {
   setContinuation,
 } from './db/session-state.js';
 import { formatMessages, extractRouting, categorizeMessage, isClearCommand, stripInternalTags, type RoutingContext } from './formatter.js';
-import type { AgentProvider, AgentQuery, ProviderEvent } from './providers/types.js';
+import type { AgentProvider, AgentQuery, ProviderEvent, ProviderFile } from './providers/types.js';
 
 const POLL_INTERVAL_MS = 1000;
 const ACTIVE_POLL_INTERVAL_MS = 500;
@@ -309,8 +312,8 @@ async function processQuery(
         // (send_message) mid-turn, or the message may not need a response
         // at all — either way the turn is finished.
         markCompleted(initialBatchIds);
-        if (event.text) {
-          dispatchResultText(event.text, routing);
+        if (event.text || event.files?.length) {
+          dispatchResultText(event.text ?? '', routing, event.files);
         }
       }
     }
@@ -351,12 +354,13 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
  * This preserves the simple case of one user on one channel — the agent
  * doesn't need to know about wrapping syntax at all.
  */
-function dispatchResultText(text: string, routing: RoutingContext): void {
+function dispatchResultText(text: string, routing: RoutingContext, files: ProviderFile[] = []): void {
   const MESSAGE_RE = /<message\s+to="([^"]+)"\s*>([\s\S]*?)<\/message>/g;
 
   let match: RegExpExecArray | null;
   let sent = 0;
   let lastIndex = 0;
+  let filesSent = false;
   const scratchpadParts: string[] = [];
 
   while ((match = MESSAGE_RE.exec(text)) !== null) {
@@ -373,7 +377,8 @@ function dispatchResultText(text: string, routing: RoutingContext): void {
       scratchpadParts.push(`[dropped: unknown destination "${toName}"] ${body}`);
       continue;
     }
-    sendToDestination(dest, body, routing);
+    sendToDestination(dest, body, routing, filesSent ? [] : files);
+    filesSent = filesSent || files.length > 0;
     sent++;
   }
   if (lastIndex < text.length) {
@@ -385,23 +390,25 @@ function dispatchResultText(text: string, routing: RoutingContext): void {
   // Single-destination shortcut: the agent wrote plain text — send to
   // the session's originating channel (from session_routing) if available,
   // otherwise fall back to the single destination.
-  if (sent === 0 && scratchpad) {
+  if (sent === 0 && (scratchpad || files.length > 0)) {
     if (routing.channelType && routing.platformId) {
+      const id = generateId();
+      const filenames = writeOutboxFiles(id, files);
       // Reply to the channel/thread the message came from
       writeMessageOut({
-        id: generateId(),
+        id,
         in_reply_to: routing.inReplyTo,
         kind: 'chat',
         platform_id: routing.platformId,
         channel_type: routing.channelType,
         thread_id: routing.threadId,
-        content: JSON.stringify({ text: scratchpad }),
+        content: JSON.stringify(buildContent(scratchpad, filenames)),
       });
       return;
     }
     const all = getAllDestinations();
     if (all.length === 1) {
-      sendToDestination(all[0], scratchpad, routing);
+      sendToDestination(all[0], scratchpad, routing, files);
       return;
     }
   }
@@ -415,21 +422,65 @@ function dispatchResultText(text: string, routing: RoutingContext): void {
   }
 }
 
-function sendToDestination(dest: DestinationEntry, body: string, routing: RoutingContext): void {
+function sendToDestination(dest: DestinationEntry, body: string, routing: RoutingContext, files: ProviderFile[] = []): void {
   const platformId = dest.type === 'channel' ? dest.platformId! : dest.agentGroupId!;
   const channelType = dest.type === 'channel' ? dest.channelType! : 'agent';
+  const id = generateId();
+  const filenames = writeOutboxFiles(id, files);
   // Inherit thread_id from the inbound routing context so replies land in the
   // same thread the conversation is in. For non-threaded adapters the router
   // strips thread_id at ingest, so this will already be null.
   writeMessageOut({
-    id: generateId(),
+    id,
     in_reply_to: routing.inReplyTo,
     kind: 'chat',
     platform_id: platformId,
     channel_type: channelType,
     thread_id: routing.threadId,
-    content: JSON.stringify({ text: body }),
+    content: JSON.stringify(buildContent(body, filenames)),
   });
+}
+
+function buildContent(text: string, files: string[]): { text: string; files?: string[] } {
+  return files.length > 0 ? { text, files } : { text };
+}
+
+function writeOutboxFiles(messageId: string, files: ProviderFile[]): string[] {
+  if (files.length === 0) return [];
+  const outboxDir = path.join('/workspace/outbox', messageId);
+  fs.mkdirSync(outboxDir, { recursive: true });
+
+  const used = new Set<string>();
+  const written: string[] = [];
+  for (const file of files) {
+    const filename = uniqueFilename(safeFilename(file.filename), used);
+    const bytes = Buffer.from(file.dataBase64, 'base64');
+    if (bytes.length === 0) continue;
+    fs.writeFileSync(path.join(outboxDir, filename), bytes);
+    written.push(filename);
+  }
+  return written;
+}
+
+function safeFilename(filename: string): string {
+  const base = path.basename(filename).replace(/[^\w.()+ -]/g, '_').trim();
+  return base || `codex-file-${Date.now()}`;
+}
+
+function uniqueFilename(filename: string, used: Set<string>): string {
+  if (!used.has(filename)) {
+    used.add(filename);
+    return filename;
+  }
+  const ext = path.extname(filename);
+  const stem = ext ? filename.slice(0, -ext.length) : filename;
+  for (let i = 2; ; i++) {
+    const candidate = `${stem}-${i}${ext}`;
+    if (!used.has(candidate)) {
+      used.add(candidate);
+      return candidate;
+    }
+  }
 }
 
 function sleep(ms: number): Promise<void> {
