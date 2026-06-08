@@ -36,7 +36,7 @@ describe('scripts/q.ts', () => {
   });
 
   function run(sql: string): { stdout: string; stderr: string; status: number } {
-    const r = spawnSync('pnpm', ['exec', 'tsx', Q, dbPath, sql], {
+    const r = spawnSync(process.execPath, ['--import', 'tsx', Q, dbPath, sql], {
       encoding: 'utf-8',
       cwd: path.resolve(__dirname, '..'),
     });
@@ -96,7 +96,7 @@ describe('scripts/q.ts', () => {
   });
 
   it('exits 2 with usage when args are missing', () => {
-    const r = spawnSync('pnpm', ['exec', 'tsx', Q], {
+    const r = spawnSync(process.execPath, ['--import', 'tsx', Q], {
       encoding: 'utf-8',
       cwd: path.resolve(__dirname, '..'),
     });

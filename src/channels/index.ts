@@ -13,48 +13,51 @@ import './cli.js';
 import './discord.js';
 
 // slack
-// import './slack.js';
+import './slack.js';
 
 // telegram
 import './telegram.js';
 
 // github
-// import './github.js';
+import './github.js';
 
 // linear
 import './linear.js';
 
 // google chat
-// import './gchat.js';
+import './gchat.js';
 
 // microsoft teams
-// import './teams.js';
+import './teams.js';
 
 // whatsapp cloud api
-// import './whatsapp-cloud.js';
+import './whatsapp-cloud.js';
 
 // resend (email)
-// import './resend.js';
+import './resend.js';
 
 // matrix
-// import './matrix.js';
+import './matrix.js';
 
 // webex
-// import './webex.js';
+import './webex.js';
 
 // imessage
 import './imessage.js';
 
 // gmail (native, no Chat SDK)
 
+// wechat (native HTTP bridge, no Chat SDK)
+import './wechat.js';
+
 // whatsapp (native, no Chat SDK)
 import './whatsapp.js';
 
 // signal (native, no Chat SDK — signal-cli TCP JSON-RPC daemon)
-// import './signal.js';
+import './signal.js';
 
 // emacs (native HTTP bridge, no Chat SDK)
-// import './emacs.js';
+import './emacs.js';
 
 // deltachat (native, no Chat SDK)
-// import './deltachat.js'
+import './deltachat.js';

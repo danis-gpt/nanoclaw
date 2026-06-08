@@ -13,7 +13,7 @@
  *   MATRIX_RECOVERY_KEY         — enable E2EE cross-signing
  *   MATRIX_DEVICE_ID            — stable device ID across restarts
  */
-import { createMatrixAdapter } from '@beeper/chat-adapter-matrix';
+import type { Adapter } from 'chat';
 
 import { log } from '../log.js';
 import { readEnvFile } from '../env.js';
@@ -33,6 +33,10 @@ const ENV_KEYS = [
   'MATRIX_INVITE_AUTOJOIN_ALLOWLIST',
 ] as const;
 
+type MatrixAdapter = Adapter<{ roomID: string; rootEventID?: string }> & {
+  openDM(userHandle: string): Promise<string>;
+};
+
 /**
  * Wrap the Matrix adapter so DM conversations are identified by user handle
  * across the whole system, not by ephemeral room IDs.
@@ -49,7 +53,7 @@ const ENV_KEYS = [
  *
  * Both resolutions are cached for the process lifetime.
  */
-function wrapWithDmResolution(adapter: ReturnType<typeof createMatrixAdapter>): typeof adapter {
+function wrapWithDmResolution(adapter: MatrixAdapter): MatrixAdapter {
   const origPostMessage = adapter.postMessage.bind(adapter);
   const origStartTyping = adapter.startTyping.bind(adapter);
   const origChannelIdFromThreadId = adapter.channelIdFromThreadId.bind(adapter);
@@ -145,7 +149,7 @@ function wrapWithDmResolution(adapter: ReturnType<typeof createMatrixAdapter>): 
 }
 
 registerChannelAdapter('matrix', {
-  factory: () => {
+  factory: async () => {
     const env = readEnvFile([...ENV_KEYS]);
     if (!env.MATRIX_BASE_URL) return null;
     if (!env.MATRIX_ACCESS_TOKEN && !(env.MATRIX_USERNAME && env.MATRIX_PASSWORD)) return null;
@@ -159,6 +163,7 @@ registerChannelAdapter('matrix', {
       process.env.MATRIX_INVITE_AUTOJOIN = 'true';
     }
 
+    const { createMatrixAdapter } = await import('@beeper/chat-adapter-matrix');
     const matrixAdapter = wrapWithDmResolution(createMatrixAdapter());
     const bridge = createChatSdkBridge({ adapter: matrixAdapter, concurrency: 'concurrent', supportsThreads: false });
 
