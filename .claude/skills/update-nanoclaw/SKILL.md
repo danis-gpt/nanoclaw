@@ -16,12 +16,14 @@ Run `/update-nanoclaw` in Claude Code.
 **Backup**: creates a timestamped backup branch and tag (`backup/pre-update-<hash>-<timestamp>`, `pre-update-<hash>-<timestamp>`) before touching anything. Safe to run multiple times.
 
 **Preview**: runs `git log` and `git diff` against the merge base to show upstream changes since your last sync. Groups changed files into categories:
+
 - **Skills** (`.claude/skills/`): unlikely to conflict unless you edited an upstream skill
 - **Host source** (`src/`): may conflict if you modified the same files
 - **Container** (`container/`): triggers container rebuild
 - **Build/config** (`package.json`, `pnpm-lock.yaml`, `tsconfig*.json`): lockfile changes trigger dep install
 
 **Update paths** (you pick one):
+
 - `merge` (default): `git merge upstream/<branch>`. Resolves all conflicts in one pass.
 - `cherry-pick`: `git cherry-pick <hashes>`. Pull in only the commits you want.
 - `rebase`: `git rebase upstream/<branch>`. Linear history, but conflicts resolve per-commit.
@@ -40,6 +42,7 @@ Run `/update-nanoclaw` in Claude Code.
 ## Rollback
 
 The backup tag is printed at the end of each run:
+
 ```
 git reset --hard pre-update-<hash>-<timestamp>
 ```
@@ -53,9 +56,11 @@ Only opens files with actual conflicts. Uses `git log`, `git diff`, and `git sta
 ---
 
 # Goal
+
 Help a user with a customized NanoClaw install safely incorporate upstream changes without a fresh reinstall and without blowing tokens.
 
 # Operating principles
+
 - Never proceed with a dirty working tree.
 - Always create a rollback point (backup branch + tag) before touching anything.
 - Prefer git-native operations (fetch, merge, cherry-pick). Do not manually rewrite files except conflict markers.
@@ -63,7 +68,9 @@ Help a user with a customized NanoClaw install safely incorporate upstream chang
 - Keep token usage low: rely on `git status`, `git log`, `git diff`, and open only conflicted files.
 
 # Step 0a: Refresh this skill first
+
 The update process itself evolves, so run its newest version before doing anything else:
+
 - Ensure the `upstream` remote exists (default `https://github.com/nanocoai/nanoclaw.git`) and fetch: `git fetch upstream --prune`. Detect the upstream branch (`main` or `master`).
 - Refresh this skill from upstream: `git checkout upstream/<branch> -- .claude/skills/update-nanoclaw/`
 - Re-read `.claude/skills/update-nanoclaw/SKILL.md`. If it changed, **follow the updated version from the top** instead of this one.
@@ -71,20 +78,24 @@ The update process itself evolves, so run its newest version before doing anythi
 This is the only working-tree change expected before the preflight check; the full update commits it along with everything else.
 
 # Step 0: Preflight (stop early if unsafe)
+
 Run:
+
 - `git status --porcelain`
-If output is non-empty:
+  If output is non-empty:
 - Tell the user to commit or stash first, then stop.
 - Exception: changes limited to `.claude/skills/update-nanoclaw/` are the Step 0a self-refresh — ignore those and proceed.
 
 Confirm remotes:
+
 - `git remote -v`
-If `upstream` is missing:
+  If `upstream` is missing:
 - Ask the user for the upstream repo URL (default: `https://github.com/nanocoai/nanoclaw.git`).
 - Add it: `git remote add upstream <user-provided-url>`
 - Then: `git fetch upstream --prune`
 
 Determine the upstream branch name:
+
 - `git branch -r | grep upstream/`
 - If `upstream/main` exists, use `main`.
 - If only `upstream/master` exists, use `master`.
@@ -92,42 +103,54 @@ Determine the upstream branch name:
 - Store this as UPSTREAM_BRANCH for all subsequent commands. Every command below that references `upstream/main` should use `upstream/$UPSTREAM_BRANCH` instead.
 
 Fetch:
+
 - `git fetch upstream --prune`
 
 # Step 1: Create a safety net
+
 Capture current state:
+
 - `HASH=$(git rev-parse --short HEAD)`
 - `TIMESTAMP=$(date +%Y%m%d-%H%M%S)`
 
 Create backup branch and tag (using timestamp to avoid collisions on retry):
+
 - `git branch backup/pre-update-$HASH-$TIMESTAMP`
 - `git tag pre-update-$HASH-$TIMESTAMP`
 
 Save the tag name for later reference in the summary and rollback instructions.
 
 # Step 2: Preview what upstream changed (no edits yet)
+
 Compute common base:
+
 - `BASE=$(git merge-base HEAD upstream/$UPSTREAM_BRANCH)`
 
 Show upstream commits since BASE:
+
 - `git log --oneline $BASE..upstream/$UPSTREAM_BRANCH`
 
 Show local commits since BASE (custom drift):
+
 - `git log --oneline $BASE..HEAD`
 
 Show file-level impact from upstream:
+
 - `git diff --name-only $BASE..upstream/$UPSTREAM_BRANCH`
 
 Bucket the upstream changed files:
+
 - **Skills** (`.claude/skills/`): unlikely to conflict unless the user edited an upstream skill
 - **Host source** (`src/`): may conflict if user modified the same files
 - **Container** (`container/`): triggers container rebuild (+ typecheck if `agent-runner/src/` changed)
 - **Build/config** (`package.json`, `pnpm-lock.yaml`, `tsconfig*.json`): lockfile changes trigger dep install
+- **Version pins** (`versions.json`): a changed `onecli-gateway` / `onecli-cli` value requires upgrading the OneCLI gateway/CLI to match — see Step 5.5
 - **Other**: docs, tests, setup scripts, misc
 
 **Large drift check:** If the upstream commit count and age suggest the user has a lot of catching up to do, mention that `/migrate-nanoclaw` might be a better fit — it extracts customizations and reapplies them on clean upstream instead of merging. Offer it as an option but don't push.
 
 Present these buckets to the user and ask them to choose one path using AskUserQuestion:
+
 - A) **Full update**: merge all upstream changes
 - B) **Selective update**: cherry-pick specific upstream commits
 - C) **Abort**: they only wanted the preview
@@ -136,7 +159,9 @@ Present these buckets to the user and ask them to choose one path using AskUserQ
 If Abort: stop here.
 
 # Step 3: Conflict preview (before committing anything)
+
 If Full update or Rebase:
+
 - Dry-run merge to preview conflicts. Run these as a single chained command so the abort always executes:
   ```
   git merge --no-commit --no-ff upstream/$UPSTREAM_BRANCH; git diff --name-only --diff-filter=U; git merge --abort
@@ -145,10 +170,13 @@ If Full update or Rebase:
 - If no conflicts: tell user it is clean and proceed.
 
 # Step 4A: Full update (MERGE, default)
+
 Run:
+
 - `git merge upstream/$UPSTREAM_BRANCH --no-edit`
 
 If conflicts occur:
+
 - Run `git status` and identify conflicted files.
 - For each conflicted file:
   - Open the file.
@@ -161,33 +189,41 @@ If conflicts occur:
   - If merge did not auto-commit: `git commit --no-edit`
 
 # Step 4B: Selective update (CHERRY-PICK)
+
 If user chose Selective:
+
 - Recompute BASE if needed: `BASE=$(git merge-base HEAD upstream/$UPSTREAM_BRANCH)`
 - Show commit list again: `git log --oneline $BASE..upstream/$UPSTREAM_BRANCH`
 - Ask user which commit hashes they want.
 - Apply: `git cherry-pick <hash1> <hash2> ...`
 
 If conflicts during cherry-pick:
+
 - Resolve only conflict markers, then:
   - `git add <file>`
   - `git cherry-pick --continue`
-If user wants to stop:
+    If user wants to stop:
   - `git cherry-pick --abort`
 
 # Step 4C: Rebase (only if user explicitly chose option D)
+
 Run:
+
 - `git rebase upstream/$UPSTREAM_BRANCH`
 
 If conflicts:
+
 - Resolve conflict markers only, then:
   - `git add <file>`
   - `git rebase --continue`
-If it gets messy (more than 3 rounds of conflicts):
+    If it gets messy (more than 3 rounds of conflicts):
   - `git rebase --abort`
   - Recommend merge instead.
 
 # Step 4.5: Install dependencies (if lockfiles changed)
+
 Check if the merge changed any lockfiles or package manifests:
+
 - `git diff <backup-tag-from-step-1>..HEAD --name-only | grep -E '^(pnpm-lock\.yaml|package\.json)$'`
   - If matched: `pnpm install`
 - `git diff <backup-tag-from-step-1>..HEAD --name-only | grep -E '^container/agent-runner/(bun\.lock|package\.json)$'`
@@ -197,21 +233,27 @@ Check if the merge changed any lockfiles or package manifests:
 Skip this step if neither lockfile changed.
 
 # Step 5: Validation
+
 Check which areas changed to determine what to validate:
+
 - `CHANGED_FILES=$(git diff --name-only <backup-tag-from-step-1>..HEAD)`
 
 **Host build** (always):
+
 - `pnpm run build`
 - `pnpm test` (do not fail the flow if tests are not configured)
 
 **Container typecheck** (only if `container/agent-runner/src/` files are in CHANGED_FILES AND bun types are available):
+
 - Check: `pnpm exec tsc -p container/agent-runner/tsconfig.json --noEmit`
 - If this fails because bun types are missing (`Cannot find type definition file for 'bun'`), skip with a note — type errors will surface at container runtime instead
 
 **Container image rebuild** (only if any `container/` files are in CHANGED_FILES):
+
 - `./container/build.sh`
 
 If build fails:
+
 - Show the error.
 - Only fix issues clearly caused by the merge (missing imports, type mismatches from merged code).
 - Do not refactor unrelated code.
@@ -220,6 +262,7 @@ If build fails:
 ## Local deployment note: rootless Podman/systemd install
 
 This server is a customized rootless Podman deployment. Detect it by the presence of:
+
 - `.config/systemd user services` named `nanoclaw-v2-a69a3d76.service` and `nanoclaw-codex-broker-a69a3d76.service`
 - `ops/podman-host/Containerfile`
 - host image name `localhost/nanoclaw-host-a69a3d76:latest`
@@ -247,11 +290,13 @@ For this install, validation is not the end of the update. After `pnpm run build
    ```
 
 If either service is not active, do not keep retrying blindly. Inspect:
+
 - `logs/nanoclaw.error.log`
 - `logs/codex-broker.error.log`
 - `systemctl --user status <service>`
 
 For rollback on this install, first reset the git checkout to the backup tag, rebuild if needed, then restart both services:
+
 ```bash
 git reset --hard <backup-tag-from-step-1>
 pnpm install --frozen-lockfile
@@ -261,21 +306,32 @@ systemctl --user restart nanoclaw-codex-broker-a69a3d76.service
 systemctl --user restart nanoclaw-v2-a69a3d76.service
 ```
 
+# Step 5.5: OneCLI upgrade (if pins moved)
+
+The OneCLI gateway and CLI are external components pinned in `versions.json`; when a pin moves, the running version must be upgraded to match or the new code may fail against it.
+
+If `git diff <backup-tag-from-step-1>..HEAD -- versions.json` shows the `onecli-gateway` or `onecli-cli` value changed, follow `docs/onecli-upgrades.md` before the service restart (Step 8). Otherwise skip.
+
 # Step 6: Breaking changes check
+
 After validation succeeds, check if the update introduced any breaking changes.
 
 Determine which CHANGELOG entries are new by diffing against the backup tag:
+
 - `git diff <backup-tag-from-step-1>..HEAD -- CHANGELOG.md`
 
 Parse the diff output for lines that contain `[BREAKING]` anywhere in the line. Each such line is one breaking change entry. The format is:
+
 ```
 [BREAKING] <description>. Run `/<skill-name>` to <action>.
 ```
 
 If no `[BREAKING]` lines are found:
+
 - Skip this step silently. Proceed to Step 7 (skill updates check).
 
 If one or more `[BREAKING]` lines are found:
+
 - Display a warning header to the user: "This update includes breaking changes that may require action:"
 - For each breaking change, display the full description.
 - Collect all skill names referenced in the breaking change entries (the `/<skill-name>` part).
@@ -289,19 +345,24 @@ If one or more `[BREAKING]` lines are found:
 # Step 7: Check for skill and channel/provider updates
 
 ## 7a: Skill branches
+
 Check if skills are distributed as branches in this repo:
+
 - `git branch -r --list 'upstream/skill/*'`
 
 If any `upstream/skill/*` branches exist:
+
 - Use AskUserQuestion to ask: "Upstream has skill branches. Would you like to check for skill updates?"
   - Option 1: "Yes, check for updates" (description: "Runs /update-skills to check for and apply skill branch updates")
   - Option 2: "No, skip" (description: "You can run /update-skills later any time")
 - If user selects yes, invoke `/update-skills` using the Skill tool.
 
 ## 7b: Channel and provider updates
+
 Detect installed channels by reading `src/channels/index.ts` and collecting all `import './<name>.js';` lines (excluding `cli`). For providers, check `src/providers/index.ts` the same way.
 
 If any channels/providers are installed AND `upstream/channels` or `upstream/providers` branches exist:
+
 - List the installed channels/providers.
 - Use AskUserQuestion to ask: "Would you like to update your installed channels/providers? Re-running `/add-<name>` is safe — it only updates code files, credentials and wiring are untouched."
   - One option per installed channel/provider (e.g., "Update Slack (/add-slack)")
@@ -314,6 +375,7 @@ If no channels/providers are installed, skip silently.
 Proceed to Step 7.9.
 
 # Step 7.9: Stamp the upgrade marker (required)
+
 After validation has **succeeded**, record that this install reached the new version through the supported path. Without this, the startup tripwire stops the host on its next start.
 
 - `pnpm exec tsx scripts/upgrade-state.ts set "" update-nanoclaw`
@@ -324,7 +386,9 @@ If validation did NOT succeed, do not stamp — leave the tripwire to catch the 
 Proceed to Step 8.
 
 # Step 8: Summary + rollback instructions
+
 Show:
+
 - Backup tag: the tag name created in Step 1
 - New HEAD: `git rev-parse --short HEAD`
 - Upstream HEAD: `git rev-parse --short upstream/$UPSTREAM_BRANCH`
@@ -333,6 +397,7 @@ Show:
 - Remaining local diff vs upstream: `git diff --name-only upstream/$UPSTREAM_BRANCH..HEAD`
 
 Tell the user:
+
 - To rollback: `git reset --hard <backup-tag-from-step-1>`
 - Backup branch also exists: `backup/pre-update-<HASH>-<TIMESTAMP>`
 - Restart the service to apply changes. The unit/label names are per-install — derive them with `setup/lib/install-slug.sh`. Run from your NanoClaw project root:
@@ -344,7 +409,6 @@ Tell the user:
     systemctl --user restart nanoclaw-v2-a69a3d76.service
     ```
   - **Manual** (no service found): restart `pnpm run dev`
-
 
 ## Diagnostics
 

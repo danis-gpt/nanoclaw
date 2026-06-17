@@ -51,8 +51,8 @@ importers:
         specifier: ^2.49.0
         version: 2.51.0(@deltachat/jsonrpc-client@2.51.0(ws@8.21.0))
       '@onecli-sh/sdk':
-        specifier: ^0.5.0
-        version: 0.5.0
+        specifier: 2.2.1
+        version: 2.2.1
       '@resend/chat-sdk-adapter':
         specifier: ^0.1.1
         version: 0.1.1(@chat-adapter/shared@4.30.0(zod@4.4.3))(chat@4.30.0(zod@4.4.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -826,8 +826,8 @@ packages:
   '@octokit/types@16.0.0':
     resolution: {integrity: sha512-sKq+9r1Mm4efXW1FCk7hFSeJo4QKreL/tTbR0rz/qx/r1Oa2VV83LTA/H/MuCOX7uCIJmQVRKBcbmWoySjAnSg==}
 
-  '@onecli-sh/sdk@0.5.0':
-    resolution: {integrity: sha512-oe5Yx9o98v6N1PgzcCR7nULHHqcqKWNJIDOHGOSNX+l20mLlZpFUqfKPeFmsojBNRQMoqbvZQKUlFMp6gVuYBA==}
+  '@onecli-sh/sdk@2.2.1':
+    resolution: {integrity: sha512-q2mCW4ZsARlLEoTxz/P0NQ4MiCh7Z2n28pxkSc7srS+tozyw40PdTnWYW7NI8hfSYplZTx5856Adq1iPi4KN3Q==}
     engines: {node: '>=20'}
 
   '@oxc-project/types@0.124.0':
@@ -4247,7 +4247,7 @@ snapshots:
     dependencies:
       '@octokit/openapi-types': 27.0.0
 
-  '@onecli-sh/sdk@0.5.0': {}
+  '@onecli-sh/sdk@2.2.1': {}
 
   '@oxc-project/types@0.124.0': {}
 
