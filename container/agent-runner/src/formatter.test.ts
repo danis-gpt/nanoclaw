@@ -107,6 +107,25 @@ describe('timestamp formatting', () => {
     const result = formatMessages(getPendingMessages());
     expect(result).toMatch(/(AM|PM)/);
   });
+
+  it('uses process_after as the occurrence time for scheduled tasks', () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in
+         (id, kind, timestamp, status, process_after, content)
+         VALUES (?, 'task', ?, 'pending', ?, ?)`,
+      )
+      .run(
+        'task-1',
+        '2026-07-29T03:01:27.000Z',
+        '2026-07-30T03:00:00.000Z',
+        JSON.stringify({ prompt: 'Morning digest' }),
+      );
+
+    const result = formatMessages(getPendingMessages());
+    expect(result).toContain('Jul 30');
+    expect(result).not.toContain('Jul 29');
+  });
 });
 
 describe('reply_to + quoted_message rendering', () => {
