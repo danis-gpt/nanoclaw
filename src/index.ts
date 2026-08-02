@@ -10,7 +10,6 @@ import { backfillContainerConfigs } from './backfill-container-configs.js';
 import { DATA_DIR, CREDENTIAL_PROXY_PORT } from './config.js';
 import { enforceStartupBackoff, resetCircuitBreaker } from './circuit-breaker.js';
 import { startCredentialProxy, detectAuthMode } from './credential-proxy.js';
-import { migrateGroupsToClaudeLocal } from './claude-md-compose.js';
 import { initDb } from './db/connection.js';
 import { runMigrations } from './db/migrations/index.js';
 import { ensureContainerRuntimeRunning, cleanupOrphans } from './container-runtime.js';
@@ -25,16 +24,7 @@ import { enforceUpgradeTripwire } from './upgrade-state.js';
 // effects, and the modules call registerResponseHandler/onShutdown at top
 // level — which would hit a TDZ error if the arrays lived here. Re-exported
 // here so existing callers see the same surface.
-import {
-  registerResponseHandler,
-  getResponseHandlers,
-  onShutdown,
-  getShutdownCallbacks,
-  type ResponsePayload,
-  type ResponseHandler,
-} from './response-registry.js';
-export { registerResponseHandler, onShutdown };
-export type { ResponsePayload, ResponseHandler };
+import { getResponseHandlers, getShutdownCallbacks, type ResponsePayload } from './response-registry.js';
 
 async function dispatchResponse(payload: ResponsePayload): Promise<void> {
   for (const handler of getResponseHandlers()) {
@@ -88,9 +78,6 @@ async function main(): Promise<void> {
   // 1b. Backfill container_configs from legacy container.json files.
   // Idempotent — skips groups that already have a config row.
   backfillContainerConfigs();
-
-  // 1c. One-time filesystem cutover — idempotent, no-op after first run.
-  migrateGroupsToClaudeLocal();
 
   // 2. Credential proxy (injects real API keys into container requests)
   const proxyAuthMode = detectAuthMode();
