@@ -28,6 +28,8 @@ groups/*
 # Temp files
 .tmp-*
 .worktrees/
+__pycache__/
+*.py[cod]
 
 # OS
 .DS_Store
