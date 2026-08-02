@@ -13,7 +13,7 @@ RUN apt-get update \
     tini \
   && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g @openai/codex@0.133.0
+RUN npm install -g @openai/codex@0.137.0
 
 RUN mkdir -p /home/ubuntu && chown 1000:1000 /home/ubuntu
 
