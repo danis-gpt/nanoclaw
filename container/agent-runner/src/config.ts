@@ -15,6 +15,8 @@ export interface RunnerConfig {
   groupName: string;
   agentGroupId: string;
   maxMessagesPerPrompt: number;
+  /** Idle window after completed work; 0 disables clean idle exit. */
+  idleTimeoutMs: number;
   mcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> }>;
   model?: string;
   effort?: string;
@@ -44,6 +46,7 @@ export function loadConfig(): RunnerConfig {
     groupName: (raw.groupName as string) || '',
     agentGroupId: (raw.agentGroupId as string) || '',
     maxMessagesPerPrompt: (raw.maxMessagesPerPrompt as number) || DEFAULT_MAX_MESSAGES,
+    idleTimeoutMs: (raw.idleTimeoutMs as number) || 0,
     mcpServers: (raw.mcpServers as RunnerConfig['mcpServers']) || {},
     model: (raw.model as string) || undefined,
     effort: (raw.effort as string) || undefined,

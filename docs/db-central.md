@@ -314,6 +314,7 @@ CREATE TABLE container_configs (
   image_tag              TEXT,
   assistant_name         TEXT,
   max_messages_per_prompt INTEGER,
+  idle_timeout_ms        INTEGER,                         -- NULL/0 disables clean idle exit
   skills                 TEXT NOT NULL DEFAULT '"all"',
   mcp_servers            TEXT NOT NULL DEFAULT '{}',
   packages_apt           TEXT NOT NULL DEFAULT '[]',

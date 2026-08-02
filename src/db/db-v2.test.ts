@@ -26,6 +26,7 @@ import {
   getSessionsByAgentGroup,
   getActiveSessions,
   getRunningSessions,
+  markRunningSessionsStopped,
   updateSession,
   deleteSession,
   createPendingQuestion,
@@ -372,6 +373,16 @@ describe('sessions', () => {
     expect(getRunningSessions()).toHaveLength(2);
   });
 
+  it('should reconcile stale running flags after startup orphan cleanup', () => {
+    createSession({ ...sess(), container_status: 'running' });
+    createSession({ ...sess(), id: 'sess-idle', container_status: 'idle', thread_id: 'thread-1' });
+    createSession({ ...sess(), id: 'sess-stopped', container_status: 'stopped', thread_id: 'thread-2' });
+
+    expect(markRunningSessionsStopped()).toBe(2);
+    expect(getRunningSessions()).toHaveLength(0);
+    expect(getSession('sess-1')!.container_status).toBe('stopped');
+  });
+
   it('should update', () => {
     createSession(sess());
     updateSession('sess-1', { container_status: 'running', last_active: now() });
@@ -460,6 +471,7 @@ describe('container configs', () => {
       image_tag: null,
       assistant_name: null,
       max_messages_per_prompt: null,
+      idle_timeout_ms: null,
       skills: '["all"]',
       mcp_servers: '{}',
       packages_apt: '[]',

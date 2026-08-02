@@ -54,4 +54,12 @@ describe('resolveGroupTimezone', () => {
     updateContainerConfigScalars(GROUP.id, { timezone: 'Not/AZone' });
     expect(configFromDb(getContainerConfig(GROUP.id)!, GROUP).timezone).toBeUndefined();
   });
+
+  it('persists and materializes a per-group clean idle timeout', () => {
+    updateContainerConfigScalars(GROUP.id, { idle_timeout_ms: 300_000 });
+
+    const row = getContainerConfig(GROUP.id)!;
+    expect(row.idle_timeout_ms).toBe(300_000);
+    expect(configFromDb(row, GROUP).idleTimeoutMs).toBe(300_000);
+  });
 });

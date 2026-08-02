@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
+import { loadConfig } from './config.js';
 import { findByName, getAllDestinations, type DestinationEntry } from './destinations.js';
 import {
   getPendingMessages,
@@ -28,6 +29,7 @@ import {
   type RoutingContext,
 } from './formatter.js';
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
+import { createIdleTracker } from './idle-tracker.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, ProviderExchange, ProviderFile } from './providers/types.js';
 
 const POLL_INTERVAL_MS = 1000;
@@ -124,6 +126,9 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
   // This lets the new container re-process those messages.
   clearStaleProcessingAcks();
 
+  const { idleTimeoutMs } = loadConfig();
+  const idle = createIdleTracker(idleTimeoutMs);
+
   let pollCount = 0;
   let isFirstPoll = true;
   while (true) {
@@ -139,6 +144,10 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     }
 
     if (messages.length === 0) {
+      if (idle.shouldExit()) {
+        log(`Idle timeout (${idleTimeoutMs}ms) — exiting cleanly`);
+        process.exit(0);
+      }
       await sleep(POLL_INTERVAL_MS);
       continue;
     }
@@ -261,6 +270,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
         config.provider.onExchangeComplete?.bind(config.provider),
         prompt,
         continuation,
+        idleTimeoutMs,
       );
       if (result.continuation && result.continuation !== continuation) {
         continuation = result.continuation;
@@ -300,6 +310,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // Ensure completed even if processQuery ended without a result event
     // (e.g. stream closed unexpectedly).
     markCompleted(processingIds);
+    idle.markActivity();
     log(`Completed ${ids.length} message(s)`);
   }
 }
@@ -350,6 +361,7 @@ export async function processQuery(
   onExchangeComplete: ((exchange: ProviderExchange) => void) | undefined,
   initialPrompt: string,
   initialContinuation: string | undefined,
+  idleTimeoutMs: number = 0,
 ): Promise<QueryResult> {
   let queryContinuation: string | undefined;
   let done = false;
@@ -497,6 +509,7 @@ export async function processQuery(
         // Claude session with no prior context.
         setContinuation(providerName, event.continuation);
       } else if (event.type === 'result') {
+        let keepQueryOpenForRetry = false;
         // A result — with or without text — means the turn is done. Mark
         // the initial batch completed now so the host sweep doesn't see
         // stale 'processing' claims while the query stays open for
@@ -530,6 +543,7 @@ export async function processQuery(
             archivePrompts.shift();
           } else {
             const willRetryWrapping = hasUnwrapped && !unwrappedNudged && !!event.text;
+            keepQueryOpenForRetry = willRetryWrapping || willRetryTaskBlocks;
             notifyExchangeComplete(onExchangeComplete, {
               prompt: archivePrompts[0] ?? initialPrompt,
               result: resultText,
@@ -560,6 +574,7 @@ export async function processQuery(
             if (!willRetryWrapping && !willRetryTaskBlocks) archivePrompts.shift();
           }
         } else archivePrompts.shift();
+        if (idleTimeoutMs > 0 && !keepQueryOpenForRetry) query.end();
       }
     }
   } catch (err) {

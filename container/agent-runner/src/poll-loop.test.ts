@@ -436,6 +436,25 @@ describe('error result with no <message> envelope', () => {
     expect(pushes).toHaveLength(1);
     expect(pushes[0]).toContain('was not delivered');
   });
+
+  it('ends a completed idle-enabled query but keeps an unwrapped retry open', async () => {
+    let completedEnds = 0;
+    const completed = makeResultQuery({ type: 'result', text: 'billing unavailable', isError: true });
+    completed.query.end = () => {
+      completedEnds++;
+    };
+    await processQuery(completed.query, ERR_ROUTING, ['m1'], 'claude', undefined, 'prompt', undefined, 1_000);
+    expect(completedEnds).toBe(1);
+
+    let retryEnds = 0;
+    const retry = makeResultQuery({ type: 'result', text: 'bare retry text' });
+    retry.query.end = () => {
+      retryEnds++;
+    };
+    await processQuery(retry.query, ERR_ROUTING, ['m1'], 'claude', undefined, 'prompt', undefined, 1_000);
+    expect(retry.pushes).toHaveLength(1);
+    expect(retryEnds).toBe(0);
+  });
 });
 
 describe('isCorruptionError', () => {

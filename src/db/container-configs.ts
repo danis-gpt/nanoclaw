@@ -9,6 +9,7 @@ const SCALAR_COLUMNS = new Set([
   'image_tag',
   'assistant_name',
   'max_messages_per_prompt',
+  'idle_timeout_ms',
   'cli_scope',
   'timezone',
 ]);
@@ -30,11 +31,11 @@ export function createContainerConfig(config: ContainerConfigRow): void {
     .prepare(
       `INSERT INTO container_configs (
         agent_group_id, provider, model, effort, image_tag, assistant_name,
-        max_messages_per_prompt, skills, mcp_servers, packages_apt, packages_npm,
+        max_messages_per_prompt, idle_timeout_ms, skills, mcp_servers, packages_apt, packages_npm,
         additional_mounts, cli_scope, timezone, updated_at
       ) VALUES (
         @agent_group_id, @provider, @model, @effort, @image_tag, @assistant_name,
-        @max_messages_per_prompt, @skills, @mcp_servers, @packages_apt, @packages_npm,
+        @max_messages_per_prompt, @idle_timeout_ms, @skills, @mcp_servers, @packages_apt, @packages_npm,
         @additional_mounts, @cli_scope, @timezone, @updated_at
       )`,
     )
@@ -85,6 +86,7 @@ export function updateContainerConfigScalars(
       | 'image_tag'
       | 'assistant_name'
       | 'max_messages_per_prompt'
+      | 'idle_timeout_ms'
       | 'cli_scope'
       | 'timezone'
     >

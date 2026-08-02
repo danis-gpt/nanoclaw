@@ -12,6 +12,7 @@ import { enforceStartupBackoff, resetCircuitBreaker } from './circuit-breaker.js
 import { startCredentialProxy, detectAuthMode } from './credential-proxy.js';
 import { initDb } from './db/connection.js';
 import { runMigrations } from './db/migrations/index.js';
+import { markRunningSessionsStopped } from './db/sessions.js';
 import { ensureContainerRuntimeRunning, cleanupOrphans } from './container-runtime.js';
 import { startActiveDeliveryPoll, startSweepDeliveryPoll, setDeliveryAdapter, stopDeliveryPolls } from './delivery.js';
 import { startHostSweep, stopHostSweep } from './host-sweep.js';
@@ -86,7 +87,10 @@ async function main(): Promise<void> {
 
   // 3. Container runtime
   ensureContainerRuntimeRunning();
-  cleanupOrphans();
+  if (cleanupOrphans()) {
+    const reconciled = markRunningSessionsStopped();
+    if (reconciled > 0) log.info('Reconciled stale container session state', { count: reconciled });
+  }
 
   // 3. Channel adapters
   await initChannelAdapters((adapter: ChannelAdapter): ChannelSetup => {

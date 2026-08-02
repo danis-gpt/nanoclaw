@@ -118,6 +118,13 @@ export function getRunningSessions(): Session[] {
   return getDb().prepare("SELECT * FROM sessions WHERE container_status IN ('running', 'idle')").all() as Session[];
 }
 
+/** Reconcile persisted runtime state after this install's orphan containers were stopped. */
+export function markRunningSessionsStopped(): number {
+  return getDb()
+    .prepare("UPDATE sessions SET container_status = 'stopped' WHERE container_status IN ('running', 'idle')")
+    .run().changes;
+}
+
 export function updateSession(
   id: string,
   updates: Partial<Pick<Session, 'status' | 'container_status' | 'last_active' | 'agent_provider'>>,

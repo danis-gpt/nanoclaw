@@ -67,7 +67,7 @@ export function ensureContainerRuntimeRunning(): void {
  * cannot reap our containers, and we cannot reap theirs. The label is
  * stamped onto every container at spawn time — see container-runner.ts.
  */
-export function cleanupOrphans(): void {
+export function cleanupOrphans(): boolean {
   try {
     const output = execSync(
       `${CONTAINER_RUNTIME_BIN} ps --filter label=${CONTAINER_INSTALL_LABEL} --format '{{.Names}}'`,
@@ -87,7 +87,9 @@ export function cleanupOrphans(): void {
     if (orphans.length > 0) {
       log.info('Stopped orphaned containers', { count: orphans.length, names: orphans });
     }
+    return true;
   } catch (err) {
     log.warn('Failed to clean up orphaned containers', { err });
+    return false;
   }
 }

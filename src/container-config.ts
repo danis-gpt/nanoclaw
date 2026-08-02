@@ -42,6 +42,8 @@ export interface ContainerConfig {
   assistantName?: string;
   agentGroupId?: string;
   maxMessagesPerPrompt?: number;
+  /** Idle window after completed work; unset/0 disables clean idle exit. */
+  idleTimeoutMs?: number;
   model?: string;
   effort?: string;
   timezone?: string;
@@ -74,6 +76,7 @@ export function configFromDb(row: ContainerConfigRow, group: AgentGroup): Contai
     assistantName: row.assistant_name ?? group.name,
     agentGroupId: group.id,
     maxMessagesPerPrompt: row.max_messages_per_prompt ?? undefined,
+    idleTimeoutMs: row.idle_timeout_ms ?? undefined,
     model: row.model ?? undefined,
     effort: row.effort ?? undefined,
     timezone: row.timezone && isValidTimezone(row.timezone) ? row.timezone : undefined,
