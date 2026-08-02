@@ -9,12 +9,12 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 DEFAULT_MCP_URLS = [
-    "http://kommo-mcp:8001/mcp",
     "http://172.21.0.2:8001/mcp",
+    "http://kommo-mcp:8001/mcp",
     "http://172.19.0.4:8001/mcp",
 ]
 
@@ -35,6 +35,8 @@ USAGE = """Usage:
   python3 scripts/kommo-cli.py events [--user_id ID] [--days N] [--limit N]
   python3 scripts/kommo-cli.py entity get <entity_type> <entity_id>
   python3 scripts/kommo-cli.py entity list <entity_type> [--limit N] [--query TEXT]
+  python3 scripts/kommo-cli.py sync-status
+  python3 scripts/kommo-cli.py freshness [--max-age-hours N]
   python3 scripts/kommo-cli.py sql "<SELECT ...>"
   python3 scripts/kommo-cli.py sql -
   python3 scripts/kommo-cli.py raw <tool_name> [json_args]
@@ -45,6 +47,9 @@ def candidate_urls() -> list[str]:
     configured = os.environ.get("KOMMO_MCP_URL", "").strip()
     if configured:
         return [configured]
+    configured_many = os.environ.get("KOMMO_MCP_URLS", "").strip()
+    if configured_many:
+        return [url.strip() for url in configured_many.split(",") if url.strip()]
     return DEFAULT_MCP_URLS
 
 
@@ -184,6 +189,80 @@ def require_rest(cmd: str, rest: list[str]) -> None:
         sys.exit(1)
 
 
+def strip_trailing_semicolon(query: str) -> str:
+    query = query.strip()
+    while query.endswith(";"):
+        query = query[:-1].rstrip()
+    return query
+
+
+def parse_dt(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def evaluate_sync_status(status: dict[str, Any], max_age_hours: float) -> dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    entities: dict[str, Any] = {}
+    stale = False
+    failed = False
+    oldest: datetime | None = None
+
+    for entity, info in sorted(status.items()):
+        if not isinstance(info, dict):
+            continue
+        last_sync = parse_dt(info.get("last_sync_at"))
+        age_hours = None
+        if last_sync:
+            age_hours = (now - last_sync).total_seconds() / 3600
+            oldest = last_sync if oldest is None or last_sync < oldest else oldest
+        entity_failed = info.get("status") != "completed" or bool(info.get("error_message"))
+        entity_stale = age_hours is None or age_hours > max_age_hours
+        stale = stale or entity_stale
+        failed = failed or entity_failed
+        entities[entity] = {
+            "status": info.get("status"),
+            "last_sync_at": info.get("last_sync_at"),
+            "age_hours": round(age_hours, 2) if age_hours is not None else None,
+            "records_count": info.get("records_count"),
+            "error_message": info.get("error_message"),
+            "stale": entity_stale,
+            "failed": entity_failed,
+        }
+
+    return {
+        "ok": not stale and not failed,
+        "stale": stale,
+        "failed": failed,
+        "max_age_hours": max_age_hours,
+        "oldest_sync_at": oldest.isoformat() if oldest else None,
+        "checked_at": now.isoformat(),
+        "entities": entities,
+    }
+
+
+def cmd_sync_status() -> None:
+    data = mcp_call("kommo_sync_status", silent=True)
+    print(json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def cmd_freshness(args: list[str]) -> None:
+    params = parse_optional_args(args)
+    max_age_hours = float(params.get("max-age-hours", 6))
+    data = mcp_call("kommo_sync_status", silent=True)
+    report = evaluate_sync_status(data if isinstance(data, dict) else {}, max_age_hours)
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    if not report["ok"]:
+        sys.exit(2)
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print(USAGE)
@@ -252,10 +331,14 @@ def main() -> None:
         mcp_call("kommo_entity", params)
     elif cmd == "events":
         cmd_events(rest)
+    elif cmd == "sync-status":
+        cmd_sync_status()
+    elif cmd == "freshness":
+        cmd_freshness(rest)
     elif cmd == "sql":
         require_rest(cmd, rest)
         query = sys.stdin.read() if rest[0] == "-" else " ".join(rest)
-        query = query.strip()
+        query = strip_trailing_semicolon(query)
         if not query:
             print("Error: empty SQL query", file=sys.stderr)
             sys.exit(1)

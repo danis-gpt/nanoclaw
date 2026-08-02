@@ -2,19 +2,24 @@ import os from 'os';
 import path from 'path';
 
 import { readEnvFile } from './env.js';
-import { getContainerImageBase, getDefaultContainerImage, getInstallSlug } from './install-slug.js';
+import { getContainerImageBase, getInstallSlug } from './install-slug.js';
 import { isValidTimezone } from './timezone.js';
 
 // Read config values from .env (falls back to process.env).
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
+  'CONTAINER_IMAGE',
+  'CONTAINER_IMAGE_BASE',
   'ONECLI_URL',
   'ONECLI_API_KEY',
   'CREDENTIAL_PROXY_PORT',
   'TZ',
   'CODEX_DEFAULT_MODEL',
   'CODEX_ESCALATION_MODEL',
+  'CODEX_PROVIDER_MODE',
+  'CODEX_HOME',
+  'CODEX_AGENT_HOME',
   'CODEX_AUTO_ESCALATION',
   'CODEX_AUTO_ESCALATION_MIN_SCORE',
   'CODEX_AUTO_ESCALATION_LONG_PROMPT_CHARS',
@@ -37,8 +42,10 @@ export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 
 // Per-checkout image tag so two installs on the same host don't share
 // `nanoclaw-agent:latest` and clobber each other on rebuild.
-export const CONTAINER_IMAGE_BASE = process.env.CONTAINER_IMAGE_BASE || getContainerImageBase(PROJECT_ROOT);
-export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || getDefaultContainerImage(PROJECT_ROOT);
+export const CONTAINER_IMAGE_BASE =
+  process.env.CONTAINER_IMAGE_BASE || envConfig.CONTAINER_IMAGE_BASE || getContainerImageBase(PROJECT_ROOT);
+export const CONTAINER_IMAGE =
+  process.env.CONTAINER_IMAGE || envConfig.CONTAINER_IMAGE || `${CONTAINER_IMAGE_BASE}:latest`;
 // Install slug — stamped onto every spawned container via --label so
 // cleanupOrphans only reaps containers from this install, not peers.
 export const INSTALL_SLUG = getInstallSlug(PROJECT_ROOT);
@@ -54,6 +61,14 @@ export const CREDENTIAL_PROXY_PORT = parseInt(
 export const CODEX_DEFAULT_MODEL = process.env.CODEX_DEFAULT_MODEL || envConfig.CODEX_DEFAULT_MODEL || 'gpt-5.3-codex';
 export const CODEX_ESCALATION_MODEL =
   process.env.CODEX_ESCALATION_MODEL || envConfig.CODEX_ESCALATION_MODEL || 'auto-frontier';
+export type CodexProviderMode = 'broker' | 'native';
+export const CODEX_PROVIDER_MODE: CodexProviderMode =
+  (process.env.CODEX_PROVIDER_MODE || envConfig.CODEX_PROVIDER_MODE || '').toLowerCase() === 'native'
+    ? 'native'
+    : 'broker';
+export const CODEX_HOME = process.env.CODEX_HOME || envConfig.CODEX_HOME || path.join(HOME_DIR, '.codex');
+export const CODEX_AGENT_HOME =
+  process.env.CODEX_AGENT_HOME || envConfig.CODEX_AGENT_HOME || path.join(DATA_DIR, 'codex-agent-home');
 export const CODEX_AUTO_ESCALATION =
   (process.env.CODEX_AUTO_ESCALATION || envConfig.CODEX_AUTO_ESCALATION || 'true') !== 'false';
 export const CODEX_AUTO_ESCALATION_MIN_SCORE = Math.max(

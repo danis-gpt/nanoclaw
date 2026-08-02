@@ -1,0 +1,7 @@
+[Unit]
+Description=Refresh OpenClaw memory into NanoClaw agent imports
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ubuntu/pr/nanoclaw1/nanoclaw-v2
+ExecStart=/usr/bin/python3 ops/openclaw-memory-refresh.py --agent all --apply
