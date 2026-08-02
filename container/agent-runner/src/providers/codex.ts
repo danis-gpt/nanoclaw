@@ -5,6 +5,7 @@ import os from 'os';
 import path from 'path';
 import readline from 'readline';
 
+import { memoryContextForSessionStart, type MemorySessionHookRegistration } from '../memory/session-hook.js';
 import { codexAppFeatureArgs } from './codex-app-policy.js';
 import { registerProvider } from './provider-registry.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, ProviderFile, ProviderOptions, QueryInput } from './types.js';
@@ -27,10 +28,15 @@ function modelHintForPrompt(prompt: string): 'default' | 'escalation' {
     : 'default';
 }
 
-function buildPrompt(input: QueryInput, assistantName?: string): string {
+export function buildPrompt(
+  input: QueryInput,
+  assistantName?: string,
+  agentDir = '/workspace/agent',
+  includeMemory = false,
+): string {
   const parts: string[] = [];
-  const shared = readIfExists('/workspace/agent/CLAUDE.md');
-  const local = readIfExists('/workspace/agent/CLAUDE.local.md');
+  const shared = readIfExists(path.join(agentDir, 'CLAUDE.md'));
+  const local = readIfExists(path.join(agentDir, 'CLAUDE.local.md'));
 
   parts.push('You are running as a NanoClaw agent through Codex CLI.');
   if (assistantName) parts.push(`Assistant name: ${assistantName}.`);
@@ -46,6 +52,9 @@ function buildPrompt(input: QueryInput, assistantName?: string): string {
   }
   if (local) {
     parts.push('Persistent local memory from CLAUDE.local.md:', local);
+  }
+  if (includeMemory) {
+    parts.push('Provider-neutral persistent memory:', memoryContextForSessionStart('startup', agentDir) ?? '');
   }
   parts.push('Incoming message batch:', input.prompt);
   return parts.join('\n\n');
@@ -102,6 +111,7 @@ export class CodexProvider implements AgentProvider {
   private mode: 'broker' | 'native';
   private brokerSocket: string;
   private brokerToken: string;
+  private memorySessionHook?: MemorySessionHookRegistration;
 
   constructor(options: ProviderOptions = {}) {
     this.assistantName = options.assistantName;
@@ -112,12 +122,17 @@ export class CodexProvider implements AgentProvider {
     this.brokerToken = options.env?.CODEX_BROKER_TOKEN || process.env.CODEX_BROKER_TOKEN || '';
   }
 
+  registerMemorySessionHook(hook: MemorySessionHookRegistration): void {
+    this.memorySessionHook = hook;
+  }
+
   isSessionInvalid(err: unknown): boolean {
     const msg = err instanceof Error ? err.message : String(err);
     return /no rollout found|thread\/resume failed|no conversation found|session.*not found/i.test(msg);
   }
 
   query(input: QueryInput): AgentQuery {
+    if (!this.memorySessionHook) throw new Error('Codex memory session hook was not registered');
     let aborted = false;
     let ended = false;
     let wakeFollowUp: (() => void) | null = null;
@@ -129,7 +144,7 @@ export class CodexProvider implements AgentProvider {
       }
 
       let continuation = input.continuation;
-      let prompt = buildPrompt(input, provider.assistantName);
+      let prompt = buildPrompt(input, provider.assistantName, input.cwd, !input.continuation);
       let modelHint = modelHintForPrompt(input.prompt);
 
       while (!aborted) {
@@ -153,7 +168,7 @@ export class CodexProvider implements AgentProvider {
 
         const followUp = await nextFollowUp();
         if (!followUp) return;
-        prompt = buildPrompt({ ...input, prompt: followUp, continuation }, provider.assistantName);
+        prompt = buildPrompt({ ...input, prompt: followUp, continuation }, provider.assistantName, input.cwd, false);
         modelHint = modelHintForPrompt(followUp);
       }
     }

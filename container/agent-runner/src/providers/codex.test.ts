@@ -1,9 +1,13 @@
 import { EventEmitter } from 'events';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { Readable, Writable } from 'stream';
 
 import { afterEach, describe, expect, it } from 'bun:test';
 
-import { runNativeCodex, type SpawnCodex } from './codex.js';
+import { MEMORY_SESSION_HOOK } from '../memory/session-hook.js';
+import { buildPrompt, CodexProvider, runNativeCodex, type SpawnCodex } from './codex.js';
 
 interface FakeRun {
   code: number;
@@ -99,5 +103,28 @@ describe('runNativeCodex', () => {
     ]);
     expect(result.text).toBe('fallback answer');
     expect(result.fallbackFrom).toBe('gpt-5.3-codex-spark');
+  });
+});
+
+describe('Codex shared memory', () => {
+  it('implements the required memory session hook registration', () => {
+    const provider = new CodexProvider({ env: { CODEX_PROVIDER_MODE: 'native' } });
+    expect(() => provider.registerMemorySessionHook(MEMORY_SESSION_HOOK)).not.toThrow();
+  });
+
+  it('injects the provider-neutral memory files into a fresh Codex prompt', () => {
+    const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-memory-'));
+    try {
+      fs.mkdirSync(path.join(agentDir, 'memory', 'system'), { recursive: true });
+      fs.writeFileSync(path.join(agentDir, 'memory', 'index.md'), '# Core\nDurable fact');
+      fs.writeFileSync(path.join(agentDir, 'memory', 'system', 'definition.md'), '# Definition\nKeep it true');
+
+      const prompt = buildPrompt({ prompt: 'hello', cwd: agentDir }, 'Test', agentDir, true);
+
+      expect(prompt).toContain('Durable fact');
+      expect(prompt).toContain('Keep it true');
+    } finally {
+      fs.rmSync(agentDir, { recursive: true, force: true });
+    }
   });
 });
