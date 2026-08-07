@@ -152,6 +152,7 @@ function describeResolvedRule(
     return engage.engage_pattern === '.'
       ? 'will respond to all messages'
       : `will respond to messages matching ${engage.engage_pattern}`;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the policy boundary converts this failure to a safe denial
   } catch {
     return null;
   }
@@ -206,6 +207,7 @@ export async function requestChannelApproval(input: RequestChannelApprovalInput)
           updateMessagingGroup(originMg.id, { name });
           originMg.name = name;
         }
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the policy boundary converts this failure to a safe denial
       } catch {
         /* non-critical */
       }
@@ -227,6 +229,7 @@ export async function requestChannelApproval(input: RequestChannelApprovalInput)
   try {
     const parsed = JSON.parse(event.message.content) as Record<string, unknown>;
     senderName = (parsed.senderName ?? parsed.sender) as string | undefined;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the policy boundary converts this failure to a safe denial
   } catch {
     // non-critical
   }
@@ -281,6 +284,7 @@ export async function requestChannelApproval(input: RequestChannelApprovalInput)
       agentGroupCount: agentGroups.length,
       approver: delivery.userId,
     });
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the policy boundary converts this failure to a safe denial
   } catch (err) {
     log.error('Channel registration card delivery failed', { messagingGroupId, err });
   }

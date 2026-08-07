@@ -277,6 +277,7 @@ export async function initChannelAdapters(setupFn: (adapter: ChannelAdapter) => 
       }
       activeAdapters.set(key, adapter);
       log.info('Channel adapter started', { channel: name, type: adapter.channelType, instance: key });
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch (err) {
       log.error('Failed to start channel adapter', { channel: name, err });
     }
@@ -289,6 +290,7 @@ export async function teardownChannelAdapters(): Promise<void> {
     try {
       await adapter.teardown();
       log.info('Channel adapter stopped', { channel: name });
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch (err) {
       log.error('Failed to stop channel adapter', { channel: name, err });
     }

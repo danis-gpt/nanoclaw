@@ -148,6 +148,7 @@ export function registerResourceHelpCommands(): void {
           return lines.join('\n');
         },
       });
+      // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
     } catch {
       // Already registered — skip
     }

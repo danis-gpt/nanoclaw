@@ -61,6 +61,7 @@ export function ensureContainedInboxDir(
         log.warn('inbox-safety: rejecting unsafe inbox path', { ...context, dir });
         return null;
       }
+      // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
     } catch {
       // Does not exist yet — fine, mkdir below creates it.
     }
@@ -76,6 +77,7 @@ export function ensureContainedInboxDir(
       return null;
     }
     return realInboxDir;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch (err) {
     log.warn('inbox-safety: failed to resolve inbox dir', { ...context, inboxDir, err });
     return null;

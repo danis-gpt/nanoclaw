@@ -25,6 +25,7 @@ export function gateCommand(content: string, userId: string | null, agentGroupId
   try {
     const parsed = JSON.parse(content);
     text = (parsed.text || '').trim();
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch {
     text = content.trim();
   }

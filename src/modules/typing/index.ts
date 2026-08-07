@@ -82,6 +82,7 @@ async function triggerTyping(
 ): Promise<void> {
   try {
     await adapter?.setTyping?.(channelType, platformId, threadId, instance);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch {
     // Typing is best-effort — don't let it fail delivery or routing.
   }
@@ -92,6 +93,7 @@ function isHeartbeatFresh(agentGroupId: string, sessionId: string): boolean {
   try {
     const stat = fs.statSync(hbPath);
     return Date.now() - stat.mtimeMs < HEARTBEAT_FRESH_MS;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch {
     return false;
   }

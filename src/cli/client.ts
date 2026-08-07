@@ -38,6 +38,7 @@ async function main(): Promise<void> {
   let res;
   try {
     res = await transport.sendFrame(req);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch (e) {
     process.stderr.write(formatTransportError(e));
     process.exit(2);

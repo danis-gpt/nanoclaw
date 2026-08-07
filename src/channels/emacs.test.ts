@@ -53,6 +53,7 @@ async function req(
       res.on('end', () => {
         try {
           resolve({ status: res.statusCode!, data: JSON.parse(raw) });
+          // eslint-disable-next-line no-catch-all/no-catch-all -- the test intentionally exercises a handled failure
         } catch {
           resolve({ status: res.statusCode!, data: raw });
         }

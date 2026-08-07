@@ -37,6 +37,7 @@ export const agentsCreate = defineGuardedAction({
   grantCoversRequest: (grant, input) => {
     try {
       return (JSON.parse(grant.payload) as { name?: string }).name === input.payload.name;
+      // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
     } catch {
       return false;
     }
@@ -63,6 +64,7 @@ export const a2aSend = defineGuardedAction({
   grantCoversRequest: (grant, input) => {
     try {
       return (JSON.parse(grant.payload) as { platform_id?: string }).platform_id === input.resource?.to;
+      // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
     } catch {
       return false;
     }

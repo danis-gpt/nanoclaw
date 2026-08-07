@@ -86,6 +86,7 @@ export function forwardAttachedFiles(
       return [];
     }
     realSourceDir = fs.realpathSync(sourceDir);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch (err) {
     log.warn('agent-route: failed to inspect source outbox dir', {
       sourceMsgId: source.messageId,
@@ -131,6 +132,7 @@ export function forwardAttachedFiles(
         continue;
       }
       realSrc = fs.realpathSync(src);
+      // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
     } catch {
       log.warn('agent-route: referenced file missing in source outbox, skipped', {
         sourceMsgId: source.messageId,
@@ -151,6 +153,7 @@ export function forwardAttachedFiles(
       // pre-placed symlink / existing file at dst — the host is the sole
       // writer of these attachments.
       fs.copyFileSync(realSrc, dst, fs.constants.COPYFILE_EXCL);
+      // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
     } catch (err) {
       log.warn('agent-route: refusing to write target inbox file', {
         sourceMsgId: source.messageId,
@@ -298,6 +301,7 @@ function parseMessageContent(contentStr: string): { text: string; files: string[
       text: typeof parsed.text === 'string' ? parsed.text : '',
       files: Array.isArray(parsed.files) ? parsed.files.filter((f): f is string => typeof f === 'string') : [],
     };
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch {
     return { text: contentStr, files: [] };
   }
@@ -375,6 +379,7 @@ function forwardFileAttachments(
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(msg.content);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch {
     return msg.content;
   }
@@ -408,6 +413,7 @@ function countForwardedFiles(contentStr: string): number {
   try {
     const parsed = JSON.parse(contentStr);
     return Array.isArray(parsed.attachments) ? parsed.attachments.length : 0;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch {
     return 0;
   }

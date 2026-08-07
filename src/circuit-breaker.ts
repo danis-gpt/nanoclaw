@@ -19,6 +19,7 @@ function read(): CircuitBreakerState | null {
   try {
     const raw = fs.readFileSync(CB_PATH, 'utf-8');
     return JSON.parse(raw) as CircuitBreakerState;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch {
     return null;
   }
@@ -40,7 +41,11 @@ export function resetCircuitBreaker(): void {
   try {
     fs.unlinkSync(CB_PATH);
     log.info('Circuit breaker reset on clean shutdown');
-  } catch {}
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
+  } catch (err) {
+    if (err instanceof Error && 'code' in err && err.code === 'ENOENT') return;
+    log.warn('Failed to reset circuit breaker state', { err });
+  }
 }
 
 export async function enforceStartupBackoff(): Promise<void> {

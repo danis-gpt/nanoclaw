@@ -105,6 +105,7 @@ describe('strict validation wiring (declared args)', () => {
     let message = '';
     try {
       parse({});
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the test intentionally exercises a handled failure
     } catch (e) {
       message = (e as Error).message;
     }

@@ -114,6 +114,7 @@ function parseContent(raw: string): { prompt: string; script: string | null; ori
       script: typeof parsed.script === 'string' ? parsed.script : null,
       originSessionId: typeof parsed.originSessionId === 'string' ? parsed.originSessionId : null,
     };
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch {
     // LEGACY-COMPAT(v1-tasks): plain-string content from rows that predate the
     // JSON envelope. Removable once no pre-v2 session DBs remain in the wild.

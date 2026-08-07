@@ -84,6 +84,7 @@ function readStore(): Store {
     const parsed = JSON.parse(raw) as Store;
     if (!Array.isArray(parsed.pairings)) return { pairings: [] };
     return parsed;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
   } catch {
     return { pairings: [] };
   }
@@ -269,6 +270,7 @@ export async function waitForPairing(code: string, opts: WaitForPairingOptions =
       if (watcher)
         try {
           watcher.close();
+          // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
         } catch {
           /* ignore */
         }
@@ -292,6 +294,7 @@ export async function waitForPairing(code: string, opts: WaitForPairingOptions =
           if (!a.matched) {
             try {
               opts.onAttempt(a);
+              // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
             } catch {
               /* ignore */
             }
@@ -321,6 +324,7 @@ export async function waitForPairing(code: string, opts: WaitForPairingOptions =
       watcher = fs.watch(dir, (_event, fname) => {
         if (!fname || fname.toString().startsWith(path.basename(storePath()))) check();
       });
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch {
       // fs.watch unsupported — poll-only is fine
     }
@@ -333,6 +337,7 @@ export async function waitForPairing(code: string, opts: WaitForPairingOptions =
 export function _resetForTest(): void {
   try {
     fs.unlinkSync(storePath());
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
   } catch {
     // ignore
   }

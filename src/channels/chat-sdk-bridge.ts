@@ -205,6 +205,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           try {
             const buffer = await att.fetchData();
             entry.data = buffer.toString('base64');
+            // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
           } catch (err) {
             log.warn('Failed to download attachment', { type: att.type, err });
           }
@@ -304,10 +305,11 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       // sub-threads collapse into the one DM session.
       chat.onDirectMessage(async (thread, message) => {
         const channelId = adapter.channelIdFromThreadId(thread.id);
+        const author = message.author as { fullName?: string; userId?: string } | undefined;
         log.info('Inbound DM received', {
           adapter: adapter.name,
           channelId,
-          sender: (message.author as any)?.fullName ?? (message.author as any)?.userId ?? 'unknown',
+          sender: author?.fullName ?? author?.userId ?? 'unknown',
           threadId: thread.id,
         });
         await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message, true, false));
@@ -359,6 +361,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
               ? terminalApprovalMessage({ title, question: render.question, resolution })
               : { markdown: `${title}\n\n${resolution}` },
           );
+          // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
         } catch (err) {
           log.warn('Failed to update card after action', { err });
         }
@@ -697,6 +700,7 @@ async function handleForwardedEvent(
   let event: { type: string; data: Record<string, unknown> };
   try {
     event = JSON.parse(body);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
   } catch {
     return;
   }
@@ -756,6 +760,7 @@ async function handleForwardedEvent(
             },
           }),
         });
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch (err) {
         log.error('Failed to update interaction', { err });
       }

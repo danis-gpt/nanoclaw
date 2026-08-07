@@ -276,6 +276,7 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<voi
           options: APPROVAL_OPTIONS,
         }),
       );
+      // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
     } catch (err) {
       log.error('Failed to deliver approval card', { action, approvalId, err });
       // The single delivery target never saw the card — remove the row so it

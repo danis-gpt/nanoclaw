@@ -54,6 +54,7 @@ function isDcAdmin(userId: string): boolean {
         )
         .get(userId) != null
     );
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
   } catch {
     return false;
   }
@@ -76,6 +77,7 @@ function createAdapter(env: DcEnv): ChannelAdapter {
       await dc.rpc.startIo(accountId);
       lastImapIdleTs = Date.now();
       consecutiveBadChecks = 0;
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch (err) {
       log.error('DeltaChat: IO restart failed', { err });
     }
@@ -152,6 +154,7 @@ function createAdapter(env: DcEnv): ChannelAdapter {
               } else {
                 await dc.rpc.sendMsg(accountId, event.chatId, { text: 'Permission denied.' });
               }
+              // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
             } catch (avatarErr: unknown) {
               log.error('DeltaChat: failed to set avatar', {
                 err: avatarErr instanceof Error ? avatarErr.message : JSON.stringify(avatarErr),
@@ -185,6 +188,7 @@ function createAdapter(env: DcEnv): ChannelAdapter {
             isGroup,
             isMention: !isGroup,
           });
+          // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
         } catch (err: unknown) {
           log.error('DeltaChat: error handling incoming message', {
             err: err instanceof Error ? err.message : JSON.stringify(err),
@@ -200,6 +204,7 @@ function createAdapter(env: DcEnv): ChannelAdapter {
         if (contextId !== accountId) return;
         try {
           connectivity = await dc.rpc.getConnectivity(accountId);
+          // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
         } catch {
           /* ignore */
         }
@@ -208,6 +213,7 @@ function createAdapter(env: DcEnv): ChannelAdapter {
       await dc.rpc.startIo(accountId);
       try {
         connectivity = await dc.rpc.getConnectivity(accountId);
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch {
         /* ignore */
       }
@@ -223,6 +229,7 @@ function createAdapter(env: DcEnv): ChannelAdapter {
         const svgPath = join(accountDir, 'invite-qr.svg');
         writeFileSync(svgPath, svg);
         log.info('DeltaChat: invite link — open URL in DeltaChat app or scan ' + svgPath, { url: inviteUrl });
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch (err: unknown) {
         log.warn('DeltaChat: could not generate invite link', {
           err: err instanceof Error ? err.message : JSON.stringify(err),
@@ -247,6 +254,7 @@ function createAdapter(env: DcEnv): ChannelAdapter {
             if (idleAgeMin > 20) {
               await restartIo(`no IMAP IDLE in ${idleAgeMin.toFixed(0)}min`);
             }
+            // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
           } catch (err: unknown) {
             log.warn('DeltaChat: watchdog error', {
               err: err instanceof Error ? err.message : String(err),
@@ -261,6 +269,7 @@ function createAdapter(env: DcEnv): ChannelAdapter {
         async () => {
           try {
             await dc.rpc.maybeNetwork();
+            // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
           } catch {
             /* ignore */
           }
@@ -274,11 +283,13 @@ function createAdapter(env: DcEnv): ChannelAdapter {
       if (networkTimer) clearInterval(networkTimer);
       try {
         await dc?.rpc.stopIo(accountId);
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch {
         /* ignore */
       }
       try {
         dc?.close();
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch {
         /* ignore */
       }

@@ -55,6 +55,7 @@ export function migrateClaudeMemorySettings(settingsFile: string): boolean {
     if (!changed) return false;
     writeAtomic(settingsFile, JSON.stringify(parsed, null, 2) + '\n');
     return true;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch (err) {
     log.warn('Failed to reconcile Claude settings; leaving them unchanged', {
       settingsFile,
@@ -81,6 +82,7 @@ function writeAtomic(filePath: string, content: string): void {
   } finally {
     try {
       fs.unlinkSync(tmp);
+      // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
     } catch {
       // The rename consumed the temp file, or creation failed before it existed.
     }

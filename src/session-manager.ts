@@ -303,6 +303,7 @@ function extractAttachmentFiles(
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(contentStr);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch {
     return contentStr;
   }
@@ -474,6 +475,7 @@ export function readOutboxFiles(
       return undefined;
     }
     realOutboxDir = fs.realpathSync(outboxDir);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch (err) {
     log.warn('Failed to inspect outbox directory', { messageId, err });
     return undefined;
@@ -499,6 +501,7 @@ export function readOutboxFiles(
         continue;
       }
       files.push({ filename, data: fs.readFileSync(realFilePath) });
+      // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
     } catch {
       log.warn('Outbox file not found', { messageId, filename });
     }
@@ -533,6 +536,7 @@ export function clearOutbox(agentGroupId: string, sessionId: string, messageId: 
       return;
     }
     fs.rmSync(realOutboxDir, { recursive: true, force: true });
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch (err) {
     log.warn('Outbox cleanup failed (message already delivered)', { messageId, err });
   }

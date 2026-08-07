@@ -23,6 +23,7 @@ export async function projectDestinationsToSessions(agentGroupId: string): Promi
   for (const session of getSessionsByAgentGroup(agentGroupId)) {
     try {
       writeDestinations(agentGroupId, session.id);
+      // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
     } catch (err) {
       log.warn('Failed to project destinations to session inbound.db', { agentGroupId, sessionId: session.id, err });
     }

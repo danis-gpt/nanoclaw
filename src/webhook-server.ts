@@ -151,6 +151,7 @@ function ensureServer(): void {
         },
       });
       await fromWebResponse(webRes, res);
+      // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
     } catch (err) {
       log.error('Webhook handler error', { adapter: adapterName, url: req.url, err });
       if (!res.headersSent) {

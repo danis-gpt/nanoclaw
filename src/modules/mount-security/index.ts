@@ -126,6 +126,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
   let stat: fs.Stats;
   try {
     stat = fs.statSync(MOUNT_ALLOWLIST_PATH);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the policy boundary converts this failure to a safe denial
   } catch {
     log.warn(
       'Mount allowlist not found - additional mounts will be BLOCKED. Create the file to enable additional mounts.',
@@ -179,6 +180,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
     });
 
     return allowlist;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the policy boundary converts this failure to a safe denial
   } catch (err) {
     // Do NOT poison the cache — a corrupt edit blocks mounts only until it's
     // fixed, then the next call re-reads and recovers.
@@ -212,6 +214,7 @@ function expandPath(p: string): string {
 function getRealPath(p: string): string | null {
   try {
     return fs.realpathSync(p);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the policy boundary converts this failure to a safe denial
   } catch {
     return null;
   }

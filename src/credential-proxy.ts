@@ -69,6 +69,7 @@ export function startCredentialProxy(
           try {
             const json = JSON.parse(body.toString('utf-8'));
             log.debug('Request body', { body: json });
+            // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
           } catch {
             log.debug('Request body (raw)', { body: body.toString('utf-8').substring(0, 500) });
           }
@@ -83,6 +84,7 @@ export function startCredentialProxy(
               body = Buffer.from(JSON.stringify(json), 'utf-8');
               log.debug('Model rewritten', { from, to: json.model });
             }
+            // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
           } catch {
             // Not JSON or unparseable — pass through as-is
           }
@@ -137,6 +139,7 @@ export function startCredentialProxy(
                   const headers = { ...upRes.headers, 'content-length': body.length };
                   res.writeHead(upRes.statusCode!, headers);
                   res.end(body);
+                  // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
                 } catch {
                   res.writeHead(upRes.statusCode!, upRes.headers);
                   res.end(Buffer.concat(chunks));
@@ -159,6 +162,7 @@ export function startCredentialProxy(
                       }
                       res.write(`data: ${JSON.stringify(json)}\n\n`);
                       continue;
+                      // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
                     } catch {
                       /* not JSON, pass through */
                     }

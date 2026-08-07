@@ -151,12 +151,14 @@ function syncSymlink(linkPath: string, target: string): void {
   let currentTarget: string | null = null;
   try {
     currentTarget = fs.readlinkSync(linkPath);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch {
     /* missing */
   }
   if (currentTarget === target) return;
   try {
     fs.unlinkSync(linkPath);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch {
     /* missing */
   }

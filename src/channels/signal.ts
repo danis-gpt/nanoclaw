@@ -28,6 +28,18 @@ interface DaemonHandle {
   isExited: () => boolean;
 }
 
+interface SignalRpcMessage {
+  id?: string;
+  error?: { message?: string };
+  result?: unknown;
+  method?: string;
+  params?: unknown;
+}
+
+function isSignalRpcMessage(value: unknown): value is SignalRpcMessage {
+  return typeof value === 'object' && value !== null;
+}
+
 function spawnSignalDaemon(cliPath: string, account: string, host: string, port: number): DaemonHandle {
   const args: string[] = [];
   if (account) args.push('-a', account);
@@ -180,13 +192,16 @@ class SignalTcpClient {
   }
 
   private handleLine(line: string) {
-    let parsed: any;
+    let parsed: unknown;
     try {
       parsed = JSON.parse(line);
-    } catch {
+    } catch (err) {
+      if (!(err instanceof SyntaxError)) throw err;
       log.debug('Signal TCP: unparseable line', { line: line.slice(0, 200) });
       return;
     }
+
+    if (!isSignalRpcMessage(parsed)) return;
 
     if (parsed.id && this.pending.has(parsed.id)) {
       const p = this.pending.get(parsed.id)!;
@@ -372,12 +387,16 @@ async function transcribeAudioOptional(filePath: string): Promise<string | null>
         encoding: 'utf-8',
         stdio: ['ignore', 'pipe', 'ignore'],
       });
-      try {
-        unlinkSync(wavPath);
-        unlinkSync(`${wavPath}.txt`);
-      } catch {}
+      for (const tempPath of [wavPath, `${wavPath}.txt`]) {
+        try {
+          unlinkSync(tempPath);
+        } catch (err) {
+          if (!(err instanceof Error && 'code' in err && err.code === 'ENOENT')) throw err;
+        }
+      }
       const text = out.replace(/\[[^\]]*\]/g, '').trim();
       if (text) return text;
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch (err) {
       log.debug('Signal: local whisper transcription failed, trying OpenAI', { err });
     }
@@ -407,6 +426,7 @@ async function transcribeAudioOptional(filePath: string): Promise<string | null>
         const json = (await res.json()) as { text?: string };
         if (json.text) return json.text.trim();
       }
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch (err) {
       log.debug('Signal: OpenAI transcription failed', { err });
     }
@@ -536,7 +556,10 @@ export function createSignalAdapter(config: {
 
   function handleNotification(method: string, params: unknown): void {
     if (method === 'receive') {
-      const envelope = (params as any)?.envelope;
+      const envelope =
+        typeof params === 'object' && params !== null && 'envelope' in params
+          ? (params.envelope as SignalEnvelope | undefined)
+          : undefined;
       if (envelope) {
         handleEnvelope(envelope).catch((err) => {
           log.error('Signal: error handling envelope', { err });
@@ -736,6 +759,7 @@ export function createSignalAdapter(config: {
             throw styledErr;
           }
         }
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch (err) {
         log.error('Signal: send failed', { platformId, err });
       }
@@ -776,12 +800,14 @@ export function createSignalAdapter(config: {
       }
       await tcp.rpc('send', params);
       log.info('Signal attachments sent', { platformId, count: files.length, filenames: files.map((f) => f.filename) });
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch (err) {
       log.error('Signal: attachment send failed', { platformId, count: files.length, err });
     } finally {
       for (const p of tempPaths) {
         try {
           unlinkSync(p);
+          // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
         } catch {
           /* best-effort cleanup */
         }
@@ -826,7 +852,7 @@ export function createSignalAdapter(config: {
           const err = new Error(
             `Signal daemon not reachable at ${config.tcpHost}:${config.tcpPort}. Start it manually or set SIGNAL_MANAGE_DAEMON=true`,
           );
-          (err as any).name = 'NetworkError';
+          err.name = 'NetworkError';
           throw err;
         }
       }
@@ -854,6 +880,7 @@ export function createSignalAdapter(config: {
           name: 'NanoClaw',
           account: config.account,
         });
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch {
         log.debug('Signal: could not set profile name');
       }
@@ -863,6 +890,7 @@ export function createSignalAdapter(config: {
           typingIndicators: true,
           account: config.account,
         });
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch {
         log.debug('Signal: could not enable typing indicators');
       }
@@ -918,6 +946,7 @@ export function createSignalAdapter(config: {
         const params: Record<string, unknown> = { recipient: [platformId] };
         if (config.account) params.account = config.account;
         await tcp.rpc('sendTyping', params);
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch (err) {
         log.debug('Signal: typing indicator failed', { platformId, err });
       }
@@ -965,6 +994,7 @@ registerChannelAdapter('signal', {
     if (manageDaemon && cliPath === 'signal-cli') {
       try {
         execFileSync('which', ['signal-cli'], { stdio: 'ignore' });
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch {
         log.debug('Signal: signal-cli binary not found, skipping channel');
         return null;

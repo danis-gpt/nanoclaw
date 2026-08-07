@@ -35,6 +35,7 @@ function readJsonBody(req: http.IncomingMessage): Promise<BrokerRequest> {
     req.on('end', () => {
       try {
         resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')) as BrokerRequest);
+        // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
       } catch {
         reject(new Error('invalid JSON'));
       }
@@ -61,6 +62,7 @@ const server = http.createServer(async (req, res) => {
     const grant = readGrant(token);
     const result = await runCodex(body, grant);
     writeJson(res, 200, result);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.warn('Codex broker request failed', { err: message });
@@ -71,6 +73,7 @@ const server = http.createServer(async (req, res) => {
 fs.mkdirSync(path.dirname(CODEX_BROKER_SOCKET), { recursive: true });
 try {
   fs.unlinkSync(CODEX_BROKER_SOCKET);
+  // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
 } catch {
   /* missing or already gone */
 }
@@ -85,6 +88,7 @@ function shutdown(signal: string): void {
   server.close(() => {
     try {
       fs.unlinkSync(CODEX_BROKER_SOCKET);
+      // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
     } catch {
       /* already removed */
     }

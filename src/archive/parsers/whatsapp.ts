@@ -46,6 +46,7 @@ export async function streamWhatsAppExport(filePath: string, cb: WhatsAppCallbac
           }
           if (cb.onChatEnd) await cb.onChatEnd(chatJid, chat);
           done();
+          // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
         } catch (err) {
           done(err as Error);
         }

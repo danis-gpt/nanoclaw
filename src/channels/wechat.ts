@@ -41,6 +41,7 @@ interface SavedAuth {
 function loadAuth(): SavedAuth | null {
   try {
     return JSON.parse(fs.readFileSync(AUTH_FILE, 'utf8')) as SavedAuth;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
   } catch {
     return null;
   }
@@ -54,6 +55,7 @@ function saveAuth(auth: SavedAuth): void {
 function loadSyncBuf(): string | undefined {
   try {
     return fs.readFileSync(SYNC_BUF_FILE, 'utf8');
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
   } catch {
     return undefined;
   }
@@ -166,6 +168,7 @@ registerChannelAdapter('wechat', {
         client.on('message', (msg) => {
           try {
             onMessage(msg);
+            // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
           } catch (err) {
             log.warn('WeChat: onMessage error', { err });
           }
@@ -209,6 +212,7 @@ registerChannelAdapter('wechat', {
         try {
           const msgId = await client.sendText(to, text);
           return msgId;
+          // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
         } catch (err) {
           log.error('WeChat deliver failed', { platformId, err });
           return undefined;

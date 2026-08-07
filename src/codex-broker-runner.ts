@@ -78,6 +78,7 @@ const STABLE_CODEX_FALLBACK_MODEL = 'gpt-5.3-codex';
 function readIfExists(file: string): string {
   try {
     return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim() : '';
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch {
     return '';
   }
@@ -92,6 +93,7 @@ function availableModelSlugs(): string[] {
   try {
     const raw = JSON.parse(fs.readFileSync(cachePath, 'utf8')) as { models?: Array<{ slug?: string }> };
     return (raw.models || []).map((m) => m.slug).filter((slug): slug is string => Boolean(slug));
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch {
     return [];
   }
@@ -205,6 +207,7 @@ export function collectReferencedGeneratedFiles(text: string): BrokerFile[] {
   let rootReal: string;
   try {
     rootReal = fs.realpathSync(root);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch {
     return [];
   }
@@ -217,6 +220,7 @@ export function collectReferencedGeneratedFiles(text: string): BrokerFile[] {
     let real: string;
     try {
       real = fs.realpathSync(resolved);
+      // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
     } catch {
       continue;
     }
@@ -295,6 +299,7 @@ async function runCodexAttempt(
         } else if (event.type === 'item.completed' && event.item?.type === 'agent_message') {
           lastAgentText = event.item.text ?? null;
         }
+        // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
       } catch {
         log.debug('Ignoring non-JSON Codex output', { line: line.slice(0, 200) });
       }

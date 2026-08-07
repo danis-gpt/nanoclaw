@@ -33,6 +33,7 @@ function dockerOk(args: string[]): boolean {
   try {
     execFileSync(CONTAINER_RUNTIME_BIN, args, { stdio: 'pipe', timeout: 15000 });
     return true;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch {
     return false;
   }
@@ -47,6 +48,7 @@ function gatewayAttached(): boolean {
       { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8', timeout: 15000 },
     );
     return out.split(/\s+/).includes(ONECLI_GATEWAY_CONTAINER);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch {
     return false;
   }

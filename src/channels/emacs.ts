@@ -51,6 +51,7 @@ function createEmacsAdapter(opts: EmacsAdapterOptions): ChannelAdapter {
       try {
         const parsed = JSON.parse(body) as { text?: string };
         text = parsed.text ?? '';
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch {
         res
           .writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
@@ -81,6 +82,7 @@ function createEmacsAdapter(opts: EmacsAdapterOptions): ChannelAdapter {
 
       try {
         setupConfig?.onInbound(opts.platformId, null, inbound);
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch (err) {
         log.error('Emacs onInbound failed', { err });
       }

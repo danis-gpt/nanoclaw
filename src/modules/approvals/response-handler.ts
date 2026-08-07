@@ -114,6 +114,7 @@ async function handleRegisteredApproval(
   try {
     await handler({ session, payload, approval, userId, notify });
     log.info('Approval handled', { approvalId: approval.approval_id, action: approval.action, userId });
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch (err) {
     log.error('Approval handler threw', { approvalId: approval.approval_id, action: approval.action, err });
     notify(

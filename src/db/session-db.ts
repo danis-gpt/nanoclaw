@@ -236,6 +236,7 @@ export function getContainerState(outDb: Database.Database): ContainerState | nu
       )
       .get() as ContainerState | undefined;
     return row ?? null;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch {
     // Table not present on older session DBs — treat as "no tool in flight".
     return null;

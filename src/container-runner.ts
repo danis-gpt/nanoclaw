@@ -226,6 +226,7 @@ export function killContainer(sessionId: string, reason: string, onExit?: () => 
   log.info('Killing container', { sessionId, reason, containerName: entry.containerName });
   try {
     stopContainer(entry.containerName);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
   } catch {
     entry.process.kill('SIGKILL');
   }
@@ -403,6 +404,7 @@ function syncSkillSymlinks(claudeDir: string, containerConfig: import('./contain
     let isSymlink = false;
     try {
       isSymlink = fs.lstatSync(entryPath).isSymbolicLink();
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
     } catch {
       continue;
     }
@@ -417,6 +419,7 @@ function syncSkillSymlinks(claudeDir: string, containerConfig: import('./contain
     let entry: fs.Stats | undefined;
     try {
       entry = fs.lstatSync(linkPath);
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
     } catch {
       /* missing */
     }
@@ -449,6 +452,7 @@ function selectedSkillNames(containerConfig: import('./container-config.js').Con
     ? fs.readdirSync(sharedSkillsDir).filter((e) => {
         try {
           return fs.statSync(path.join(sharedSkillsDir, e)).isDirectory();
+          // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
         } catch {
           return false;
         }
@@ -596,6 +600,7 @@ export async function buildAgentGroupImage(agentGroupId: string): Promise<void> 
   try {
     const { stdout } = await execAsync(`${CONTAINER_RUNTIME_BIN} image inspect --format '{{.Id}}' ${CONTAINER_IMAGE}`);
     baseId = stdout.trim();
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
   } catch {
     // Non-fatal: the build below fails on its own if the base is really absent.
   }

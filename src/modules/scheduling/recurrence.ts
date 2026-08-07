@@ -42,6 +42,7 @@ export function scriptBackoffMinutes(fails: number): number {
 function appendHostTaskNote(agentGroupId: string, seriesId: string, note: string): void {
   try {
     appendRunLog(agentGroupId, seriesId, note);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch (err) {
     log.warn('Could not append host task note to run log', { agentGroupId, seriesId, err });
   }
@@ -98,6 +99,7 @@ export async function handleRecurrence(inDb: Database.Database, session: Session
         ...(scriptFails > 0 && { scriptFails, backoffMin: scriptBackoffMinutes(scriptFails) }),
         sessionId: session.id,
       });
+      // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
     } catch (err) {
       log.error('Failed to compute next recurrence', {
         messageId: msg.id,

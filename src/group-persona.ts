@@ -33,6 +33,7 @@ export function readGroupPersona(groupDir: string): string | null {
     if (!fs.fstatSync(fd).isFile()) return null;
     const content = fs.readFileSync(fd, 'utf-8').trim();
     return content || null;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch (err) {
     if (typeof err === 'object' && err !== null && 'code' in err && err.code === 'ENOENT') return null;
     log.warn('Could not read group standing instructions; omitting persona', {

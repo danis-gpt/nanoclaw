@@ -33,6 +33,21 @@ const ENV_KEYS = [
   'MATRIX_INVITE_AUTOJOIN_ALLOWLIST',
 ] as const;
 
+interface MatrixRoomInternals {
+  getJoinedMemberCount(): number;
+  getJoinedMembers(): Array<{ userId: string }>;
+}
+
+interface MatrixClientInternals {
+  getRoom(roomId: string): MatrixRoomInternals | undefined;
+}
+
+type MatrixAdapterInternals = Adapter & {
+  client?: MatrixClientInternals;
+  userID?: string;
+  isDM?: (threadId: string) => boolean;
+};
+
 type MatrixAdapter = Adapter<{ roomID: string; rootEventID?: string }> & {
   openDM(userHandle: string): Promise<string>;
 };
@@ -65,6 +80,7 @@ function wrapWithDmResolution(adapter: MatrixAdapter): MatrixAdapter {
     try {
       const { roomID } = adapter.decodeThreadId(threadId);
       return !roomID.startsWith('!');
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch {
       return true;
     }
@@ -80,6 +96,7 @@ function wrapWithDmResolution(adapter: MatrixAdapter): MatrixAdapter {
     try {
       const { roomID } = adapter.decodeThreadId(resolved);
       roomToUserCache.set(roomID, userHandle);
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch {
       // decode failure is non-fatal — outbound still works
     }
@@ -98,17 +115,19 @@ function wrapWithDmResolution(adapter: MatrixAdapter): MatrixAdapter {
       if (cached) return `matrix:${cached}`;
 
       // Not cached — check if this is a DM by membership count
-      const client = (adapter as any).client;
+      const matrixAdapter = adapter as MatrixAdapterInternals;
+      const client = matrixAdapter.client;
       const room = client?.getRoom(roomID);
       if (!room) return origChannelIdFromThreadId(threadId);
       if (room.getJoinedMemberCount() > 2) return origChannelIdFromThreadId(threadId);
 
-      const botId = (adapter as any).userID;
+      const botId = matrixAdapter.userID;
       const otherMember = room.getJoinedMembers().find((m: { userId: string }) => m.userId !== botId);
       if (!otherMember) return origChannelIdFromThreadId(threadId);
 
       roomToUserCache.set(roomID, otherMember.userId);
       return `matrix:${otherMember.userId}`;
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch {
       return origChannelIdFromThreadId(threadId);
     }
@@ -118,15 +137,17 @@ function wrapWithDmResolution(adapter: MatrixAdapter): MatrixAdapter {
   // to dispatch to onDirectMessage handlers. The Matrix adapter doesn't expose
   // this method — it only has an async isDirectRoom(). We add a synchronous
   // isDM that checks room membership count: 2 members = DM.
-  (adapter as any).isDM = (threadId: string): boolean => {
+  const matrixAdapter = adapter as MatrixAdapterInternals;
+  matrixAdapter.isDM = (threadId: string): boolean => {
     try {
       const { roomID } = adapter.decodeThreadId(threadId);
-      const client = (adapter as any).client;
+      const client = matrixAdapter.client;
       if (!client) return false;
       const room = client.getRoom(roomID);
       if (!room) return false;
       const members = room.getJoinedMemberCount();
       return members <= 2;
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch {
       return false;
     }

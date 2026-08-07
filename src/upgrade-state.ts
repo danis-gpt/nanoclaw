@@ -42,6 +42,7 @@ export function readUpgradeState(): UpgradeState | null {
   let raw: string;
   try {
     raw = fs.readFileSync(MARKER_PATH, 'utf8');
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch (e: unknown) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null;
     log.warn('Could not read upgrade marker; treating as absent', { path: MARKER_PATH, err: String(e) });
@@ -49,6 +50,7 @@ export function readUpgradeState(): UpgradeState | null {
   }
   try {
     return JSON.parse(raw) as UpgradeState;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch {
     log.warn('Upgrade marker is corrupt; treating as absent', { path: MARKER_PATH });
     return null;

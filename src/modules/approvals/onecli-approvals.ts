@@ -94,6 +94,7 @@ export function startOneCLIApprovalHandler(deliveryAdapter: ChannelDeliveryAdapt
   handle = onecli.configureManualApproval(async (request: ApprovalRequest): Promise<Decision> => {
     try {
       return await handleRequest(request);
+      // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
     } catch (err) {
       log.error('OneCLI approval handler errored', { id: request.id, err });
       return 'deny';
@@ -167,6 +168,7 @@ async function handleRequest(request: ApprovalRequest): Promise<Decision> {
         options: onecliOptions,
       }),
     );
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch (err) {
     log.error('Failed to deliver OneCLI approval card', { approvalId, oneCliRequestId: request.id, err });
     return 'deny';
@@ -251,6 +253,7 @@ async function editCardExpired(row: PendingApproval, reason: ExpiryReason): Prom
         },
       }),
     );
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch (err) {
     log.warn('Failed to edit expired OneCLI approval card', { approvalId: row.approval_id, err });
   }

@@ -80,6 +80,7 @@ async function summarizeChunk(absPath: string, sampleSize: number): Promise<Chun
     let msg: ArchivedMessage;
     try {
       msg = JSON.parse(line);
+      // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
     } catch {
       continue;
     }

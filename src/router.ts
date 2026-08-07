@@ -151,6 +151,7 @@ export function setChannelRequestGate(fn: ChannelRequestGateFn): void {
 function safeParseContent(raw: string): { text?: string; sender?: string; senderId?: string } {
   try {
     return JSON.parse(raw);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch {
     return { text: raw };
   }
@@ -426,6 +427,7 @@ function evaluateEngage(
       if (pat === '.') return true;
       try {
         return new RegExp(pat).test(text);
+        // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
       } catch {
         // Bad regex: fail open so admin sees the agent responding + can fix.
         return true;

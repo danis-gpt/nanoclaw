@@ -55,6 +55,7 @@ async function withRetry<T>(fn: () => Promise<T>, label: string, maxAttempts = 5
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return await fn();
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch (err) {
       lastErr = err;
       if (attempt === maxAttempts) break;
@@ -82,6 +83,7 @@ async function fetchBotUsername(token: string): Promise<string | null> {
     const res = await fetch(`https://api.telegram.org/bot${token}/getMe`);
     const json = (await res.json()) as { ok: boolean; result?: { username?: string } };
     return json.ok ? (json.result?.username ?? null) : null;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
   } catch (err) {
     log.warn('Telegram getMe failed', { err });
     return null;
@@ -185,6 +187,7 @@ async function sendPairingConfirmation(token: string, platformId: string): Promi
     if (!res.ok) {
       log.warn('Telegram pairing confirmation non-OK', { status: res.status });
     }
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
   } catch (err) {
     log.warn('Telegram pairing confirmation failed', { err });
   }
@@ -270,6 +273,7 @@ function createPairingInterceptor(
       });
 
       await sendPairingConfirmation(token, rawPlatformId);
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch (err) {
       log.error('Telegram pairing interceptor error', { err });
       // Fail open: pass through so a pairing bug doesn't break normal traffic.
@@ -377,6 +381,7 @@ function createTelegramMultiplexer(botConfigs: TelegramBotConfig[]): ChannelAdap
         });
         const data = (await res.json()) as { ok?: boolean; result?: { title?: string } };
         return data.ok ? (data.result?.title ?? null) : null;
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch {
         return null;
       }

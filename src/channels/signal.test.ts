@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach, type Mock } from 'vitest';
 
 // --- Mocks ---
 
@@ -21,18 +21,21 @@ vi.mock('node:child_process', () => ({
 // --- TCP socket mock ---
 
 import { EventEmitter } from 'events';
+import type { Socket } from 'node:net';
+
+type FakeSocket = EventEmitter & {
+  write: Mock<(data: string) => void>;
+  destroy: Mock<() => void>;
+  destroyed: boolean;
+};
 
 const tcpRef = vi.hoisted(() => ({
   rpcResponses: new Map<string, unknown>(),
-  fakeSocket: null as any,
+  fakeSocket: null as FakeSocket | null,
 }));
 
-function createFakeSocket(): EventEmitter & {
-  write: ReturnType<typeof vi.fn>;
-  destroy: ReturnType<typeof vi.fn>;
-  destroyed: boolean;
-} {
-  const sock = new EventEmitter() as any;
+function createFakeSocket(): FakeSocket {
+  const sock = new EventEmitter() as FakeSocket;
   sock.destroyed = false;
   sock.destroy = vi.fn(() => {
     sock.destroyed = true;
@@ -44,6 +47,7 @@ function createFakeSocket(): EventEmitter & {
       const result = tcpRef.rpcResponses.get(req.method) ?? { ok: true };
       const response = JSON.stringify({ jsonrpc: '2.0', id: req.id, result }) + '\n';
       setImmediate(() => sock.emit('data', Buffer.from(response)));
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the test intentionally exercises a handled failure
     } catch {
       /* ignore */
     }
@@ -92,14 +96,19 @@ function getRpcCalls(): Array<{
 }> {
   if (!tcpRef.fakeSocket) return [];
   return tcpRef.fakeSocket.write.mock.calls
-    .map((c: any[]) => {
+    .map((call) => {
       try {
-        return JSON.parse(c[0].trim());
+        return JSON.parse(String(call[0]).trim()) as {
+          method: string;
+          params: Record<string, unknown>;
+          id: string;
+        };
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the test intentionally exercises a handled failure
       } catch {
         return null;
       }
     })
-    .filter(Boolean);
+    .filter((call): call is NonNullable<typeof call> => call !== null);
 }
 
 function getRpcCallsForMethod(method: string) {
@@ -131,6 +140,7 @@ describe('SignalAdapter', () => {
   afterEach(() => {
     try {
       tcpRef.fakeSocket?.destroy();
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the test intentionally exercises a handled failure
     } catch {
       // already closed
     }
@@ -166,10 +176,10 @@ describe('SignalAdapter', () => {
 
     it('throws NetworkError if daemon is unreachable', async () => {
       const { createConnection } = await import('node:net');
-      vi.mocked(createConnection).mockImplementationOnce((...args: any[]) => {
+      vi.mocked(createConnection).mockImplementationOnce(() => {
         const sock = createFakeSocket();
         setImmediate(() => sock.emit('error', new Error('Connection refused')));
-        return sock as any;
+        return sock as unknown as Socket;
       });
 
       const adapter = createAdapter();
@@ -557,7 +567,7 @@ describe('SignalAdapter', () => {
       const fs = await import('node:fs');
       const adapter = createAdapter();
       await adapter.setup(createMockSetup());
-      tcpRef.fakeSocket.write.mockClear();
+      tcpRef.fakeSocket!.write.mockClear();
 
       await adapter.deliver('+15555550123', null, {
         kind: 'file',
@@ -583,7 +593,7 @@ describe('SignalAdapter', () => {
     it('sends text first, then attachment, when both are present', async () => {
       const adapter = createAdapter();
       await adapter.setup(createMockSetup());
-      tcpRef.fakeSocket.write.mockClear();
+      tcpRef.fakeSocket!.write.mockClear();
 
       await adapter.deliver('+15555550123', null, {
         kind: 'file',
@@ -609,7 +619,7 @@ describe('SignalAdapter', () => {
     it('sends multiple attachments in a single send call', async () => {
       const adapter = createAdapter();
       await adapter.setup(createMockSetup());
-      tcpRef.fakeSocket.write.mockClear();
+      tcpRef.fakeSocket!.write.mockClear();
 
       await adapter.deliver('+15555550123', null, {
         kind: 'file',
@@ -633,7 +643,7 @@ describe('SignalAdapter', () => {
     it('uses groupId for group destinations', async () => {
       const adapter = createAdapter();
       await adapter.setup(createMockSetup());
-      tcpRef.fakeSocket.write.mockClear();
+      tcpRef.fakeSocket!.write.mockClear();
 
       await adapter.deliver('group:abc123', null, {
         kind: 'file',
@@ -661,7 +671,7 @@ describe('SignalAdapter', () => {
       const os = await import('node:os');
       const adapter = createAdapter();
       await adapter.setup(createMockSetup());
-      tcpRef.fakeSocket.write.mockClear();
+      tcpRef.fakeSocket!.write.mockClear();
 
       await adapter.deliver('+15555550123', null, {
         kind: 'file',
@@ -687,7 +697,7 @@ describe('SignalAdapter', () => {
     it('sends bold text with textStyle parameter', async () => {
       const adapter = createAdapter();
       await adapter.setup(createMockSetup());
-      tcpRef.fakeSocket.write.mockClear();
+      tcpRef.fakeSocket!.write.mockClear();
 
       await adapter.deliver('+15555550123', null, {
         kind: 'text',
@@ -706,7 +716,7 @@ describe('SignalAdapter', () => {
     it('sends inline code with MONOSPACE style', async () => {
       const adapter = createAdapter();
       await adapter.setup(createMockSetup());
-      tcpRef.fakeSocket.write.mockClear();
+      tcpRef.fakeSocket!.write.mockClear();
 
       await adapter.deliver('+15555550123', null, {
         kind: 'text',
@@ -724,7 +734,7 @@ describe('SignalAdapter', () => {
     it('sends plain text without textStyle', async () => {
       const adapter = createAdapter();
       await adapter.setup(createMockSetup());
-      tcpRef.fakeSocket.write.mockClear();
+      tcpRef.fakeSocket!.write.mockClear();
 
       await adapter.deliver('+15555550123', null, {
         kind: 'text',
@@ -744,7 +754,7 @@ describe('SignalAdapter', () => {
       await adapter.setup(createMockSetup());
 
       let sendCount = 0;
-      tcpRef.fakeSocket.write.mockImplementation((data: string) => {
+      tcpRef.fakeSocket!.write.mockImplementation((data: string) => {
         try {
           const req = JSON.parse(data.trim());
           if (req.method === 'send') {
@@ -756,7 +766,7 @@ describe('SignalAdapter', () => {
                   id: req.id,
                   error: { message: 'Unknown parameter: textStyle' },
                 }) + '\n';
-              setImmediate(() => tcpRef.fakeSocket.emit('data', Buffer.from(response)));
+              setImmediate(() => tcpRef.fakeSocket!.emit('data', Buffer.from(response)));
               return;
             }
           }
@@ -766,7 +776,8 @@ describe('SignalAdapter', () => {
               id: req.id,
               result: { ok: true },
             }) + '\n';
-          setImmediate(() => tcpRef.fakeSocket.emit('data', Buffer.from(response)));
+          setImmediate(() => tcpRef.fakeSocket!.emit('data', Buffer.from(response)));
+          // eslint-disable-next-line no-catch-all/no-catch-all -- the test intentionally exercises a handled failure
         } catch {
           /* ignore */
         }
@@ -788,7 +799,7 @@ describe('SignalAdapter', () => {
     it('tracks nested styles with correct offsets', async () => {
       const adapter = createAdapter();
       await adapter.setup(createMockSetup());
-      tcpRef.fakeSocket.write.mockClear();
+      tcpRef.fakeSocket!.write.mockClear();
 
       await adapter.deliver('+15555550123', null, {
         kind: 'text',
@@ -809,7 +820,7 @@ describe('SignalAdapter', () => {
     it('maps *single-asterisk* to ITALIC', async () => {
       const adapter = createAdapter();
       await adapter.setup(createMockSetup());
-      tcpRef.fakeSocket.write.mockClear();
+      tcpRef.fakeSocket!.write.mockClear();
 
       await adapter.deliver('+15555550123', null, {
         kind: 'text',
@@ -827,7 +838,7 @@ describe('SignalAdapter', () => {
     it('maps _underscore_ to ITALIC', async () => {
       const adapter = createAdapter();
       await adapter.setup(createMockSetup());
-      tcpRef.fakeSocket.write.mockClear();
+      tcpRef.fakeSocket!.write.mockClear();
 
       await adapter.deliver('+15555550123', null, {
         kind: 'text',
@@ -908,7 +919,7 @@ describe('SignalAdapter', () => {
       expect(adapter.isConnected()).toBe(true);
 
       // Simulate the daemon dropping the TCP connection.
-      tcpRef.fakeSocket.destroy();
+      tcpRef.fakeSocket!.destroy();
       await new Promise((r) => setTimeout(r, 20));
 
       expect(adapter.isConnected()).toBe(false);

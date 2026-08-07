@@ -138,6 +138,7 @@ async function pollActive(): Promise<void> {
     for (const session of sessions) {
       await deliverSessionMessages(session);
     }
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
   } catch (err) {
     log.error('Active delivery poll error', { err });
   }
@@ -153,6 +154,7 @@ async function pollSweep(): Promise<void> {
     for (const session of sessions) {
       await deliverSessionMessages(session);
     }
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
   } catch (err) {
     log.error('Sweep delivery poll error', { err });
   }
@@ -182,6 +184,7 @@ async function drainSession(session: Session): Promise<void> {
   try {
     outDb = openOutboundDb(agentGroup.id, session.id);
     inDb = openInboundDb(agentGroup.id, session.id);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
   } catch {
     return; // DBs might not exist yet
   }
@@ -214,6 +217,7 @@ async function drainSession(session: Session): Promise<void> {
         if (msg.kind !== 'system' && msg.channel_type !== 'agent') {
           pauseTypingRefreshAfterDelivery(session.id);
         }
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
       } catch (err) {
         const attempts = (deliveryAttempts.get(msg.id) ?? 0) + 1;
         deliveryAttempts.set(msg.id, attempts);
@@ -278,6 +282,7 @@ async function deliverMessage(
       const series = session.thread_id.slice(`${TASKS_SYSTEM_THREAD_ID}:`.length);
       try {
         appendRunLog(session.agent_group_id, series, typeof content.text === 'string' ? content.text : '');
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
       } catch (err) {
         log.warn('Failed to append task run log', { id: msg.id, sessionId: session.id, err });
       }

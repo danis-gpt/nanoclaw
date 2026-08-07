@@ -131,6 +131,7 @@ async function resolveDmPlatformId(channelType: string, handle: string): Promise
   }
   try {
     return await adapter.openDM(handle);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the policy boundary converts this failure to a safe denial
   } catch (err) {
     log.error('ensureUserDm: adapter.openDM failed', { channelType, handle, err });
     return null;

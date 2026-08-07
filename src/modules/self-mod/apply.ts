@@ -76,6 +76,7 @@ export async function applyInstallPackages(payload: Record<string, unknown>, ses
       if (s) wakeContainer(s);
     });
     log.info('Container rebuild completed (bundled with install)', { agentGroupId: session.agent_group_id });
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch (e) {
     notifyAgent(
       session,

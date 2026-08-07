@@ -401,6 +401,7 @@ describe('routeAgentMessage return-path', () => {
           { id: `pong-${i}`, platform_id: A, content: JSON.stringify({ text: `pong ${i}` }), in_reply_to: null },
           SB,
         );
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the test intentionally exercises a handled failure
       } catch (e) {
         errors.push((e as Error).message);
         break;

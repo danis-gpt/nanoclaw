@@ -32,6 +32,7 @@ async function dispatchResponse(payload: ResponsePayload): Promise<void> {
     try {
       const claimed = await handler(payload);
       if (claimed) return;
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
     } catch (err) {
       log.error('Response handler threw', { questionId: payload.questionId, err });
     }
@@ -177,6 +178,7 @@ async function shutdown(signal: string): Promise<void> {
   for (const cb of getShutdownCallbacks()) {
     try {
       await cb();
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
     } catch (err) {
       log.error('Shutdown callback threw', { err });
     }

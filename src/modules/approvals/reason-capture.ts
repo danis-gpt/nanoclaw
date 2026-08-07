@@ -71,6 +71,7 @@ function extractText(event: InboundEvent): string {
   try {
     const parsed = JSON.parse(event.message.content) as Record<string, unknown>;
     return typeof parsed.text === 'string' ? parsed.text : '';
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch {
     return '';
   }
@@ -98,6 +99,7 @@ export async function armReasonCapture(approval: PendingApproval, session: Sessi
 
   try {
     await adapter.deliver(dm.channel_type, dm.platform_id, null, 'chat-sdk', JSON.stringify({ text: PROMPT_TEXT }));
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch (err) {
     log.error('reject-with-reason: reason prompt delivery failed, finalizing plain reject', {
       approvalId: approval.approval_id,

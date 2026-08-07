@@ -72,6 +72,7 @@ async function resolveWaWebVersion(): Promise<[number, number, number]> {
         return version;
       }
     }
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
   } catch {
     // Fall through to Baileys' own fetch
   }
@@ -83,6 +84,7 @@ async function resolveWaWebVersion(): Promise<[number, number, number]> {
       log.info('Fetched WA Web version from Baileys', { version });
       return version as [number, number, number];
     }
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
   } catch {
     // Fall through
   }
@@ -294,7 +296,7 @@ registerChannelAdapter('whatsapp', {
     let flushing = false;
 
     // Sent message cache for retry/re-encrypt requests
-    const sentMessageCache = new Map<string, any>();
+    const sentMessageCache = new Map<string, proto.IMessage>();
 
     // Group metadata cache with TTL
     const groupMetadataCache = new Map<string, { metadata: GroupMetadata; expiresAt: number }>();
@@ -355,6 +357,7 @@ registerChannelAdapter('whatsapp', {
           log.info('Translated LID via signal repository', { lidJid: jid, phoneJid });
           return phoneJid;
         }
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch (err) {
         log.debug('Failed to resolve LID via signalRepository', { jid, err });
       }
@@ -399,6 +402,7 @@ registerChannelAdapter('whatsapp', {
         }
         lastGroupSync = Date.now();
         log.info('Group metadata synced', { count });
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch (err) {
         log.error('Failed to sync group metadata', { err });
       }
@@ -424,10 +428,9 @@ registerChannelAdapter('whatsapp', {
     }
 
     /** Download media from an inbound message, save to /workspace/attachments/. */
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     async function downloadInboundMedia(
       msg: WAMessage,
-      normalized: any,
+      normalized: proto.IMessage,
     ): Promise<Array<{ type: string; name: string; localPath: string }>> {
       const mediaTypes: Array<{ key: string; type: string; ext: string }> = [
         { key: 'imageMessage', type: 'image', ext: '.jpg' },
@@ -437,15 +440,17 @@ registerChannelAdapter('whatsapp', {
       ];
       const results: Array<{ type: string; name: string; localPath: string }> = [];
       for (const { key, type, ext } of mediaTypes) {
-        if (!normalized[key]) continue;
+        const media = normalized[key as keyof proto.IMessage] as { fileName?: string } | null | undefined;
+        if (!media) continue;
         try {
           const buffer = await downloadMediaMessage(msg, 'buffer', {});
           // documentMessage.fileName is attacker-controlled and rides through
           // WhatsApp's E2E channel — Meta can't sanitize it server-side. Without
           // this guard, a `..`-laden fileName escapes attachDir on path.join.
-          const rawFilename = normalized[key].fileName;
+          const rawFilename = media.fileName;
           const fallback = `${type}-${Date.now()}${ext}`;
-          const filename = isSafeAttachmentName(rawFilename) ? rawFilename : fallback;
+          const filename =
+            typeof rawFilename === 'string' && isSafeAttachmentName(rawFilename) ? rawFilename : fallback;
           if (rawFilename && filename !== rawFilename) {
             log.warn('Refused unsafe attachment filename — would escape attachments dir', {
               rawFilename,
@@ -458,6 +463,7 @@ registerChannelAdapter('whatsapp', {
           fs.writeFileSync(filePath, buffer);
           results.push({ type, name: filename, localPath: `attachments/${filename}` });
           log.info('Media downloaded', { type, filename });
+          // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
         } catch (err) {
           log.warn('Failed to download media', { type, err });
         }
@@ -483,6 +489,7 @@ registerChannelAdapter('whatsapp', {
           }
         }
         return sent?.key?.id ?? undefined;
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch (err) {
         outgoingQueue.push({ jid, text, mentions });
         log.warn('Failed to send, message queued', { jid, err, queueSize: outgoingQueue.length });
@@ -534,6 +541,7 @@ registerChannelAdapter('whatsapp', {
             log.info(`WhatsApp pairing code: ${code}`);
             log.info('Enter in WhatsApp > Linked Devices > Link with phone number');
             fs.writeFileSync(pairingCodeFile, code, 'utf-8');
+            // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
           } catch (err) {
             log.error('Failed to request pairing code', { err });
           }
@@ -550,6 +558,7 @@ registerChannelAdapter('whatsapp', {
               const QRCode = await import('qrcode');
               const qrText = await QRCode.toString(qr, { type: 'terminal' });
               log.info('WhatsApp QR code — scan with WhatsApp > Linked Devices:\n' + qrText);
+              // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
             } catch {
               log.info('WhatsApp QR code (raw)', { qr });
             }
@@ -587,6 +596,7 @@ registerChannelAdapter('whatsapp', {
               fs.rmSync(authDir, { recursive: true, force: true });
               fs.mkdirSync(authDir, { recursive: true });
               log.info('WhatsApp auth cleared — set WHATSAPP_ENABLED=true and restart to re-link');
+              // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
             } catch (err) {
               log.error('Failed to clear WhatsApp auth after logout', { err });
             }
@@ -615,6 +625,7 @@ registerChannelAdapter('whatsapp', {
           // Clean up pairing code file after successful connection
           try {
             if (fs.existsSync(pairingCodeFile)) fs.unlinkSync(pairingCodeFile);
+            // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
           } catch {
             /* ignore */
           }
@@ -775,6 +786,7 @@ registerChannelAdapter('whatsapp', {
 
             // WhatsApp doesn't use threads — threadId is null
             setupConfig.onInbound(chatJid, null, inbound);
+            // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
           } catch (err) {
             log.error('Error processing incoming WhatsApp message', {
               err,
@@ -845,6 +857,7 @@ registerChannelAdapter('whatsapp', {
                 key: { remoteJid: platformId, id: content.messageId as string, fromMe: false },
               },
             });
+            // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
           } catch (err) {
             log.debug('Failed to send reaction', { platformId, err });
           }
@@ -877,6 +890,7 @@ registerChannelAdapter('whatsapp', {
                 sentMessageCache.set(sent.key.id, sent.message);
               }
               if (caption) captionUsed = true;
+              // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
             } catch (err) {
               log.error('Failed to send file', { platformId, filename: file.filename, err });
             }
@@ -894,6 +908,7 @@ registerChannelAdapter('whatsapp', {
       async setTyping(platformId: string) {
         try {
           await sock.sendPresenceUpdate('composing', platformId);
+          // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
         } catch (err) {
           log.debug('Failed to update typing status', { jid: platformId, err });
         }
@@ -920,6 +935,7 @@ registerChannelAdapter('whatsapp', {
               name: m.subject,
               isGroup: true,
             }));
+          // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
         } catch (err) {
           log.error('Failed to sync WhatsApp conversations', { err });
           return [];

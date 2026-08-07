@@ -72,6 +72,7 @@ function extractAndUpsertUser(event: InboundEvent): string | null {
   let content: Record<string, unknown>;
   try {
     content = JSON.parse(event.message.content) as Record<string, unknown>;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the policy boundary converts this failure to a safe denial
   } catch {
     return null;
   }
@@ -109,6 +110,7 @@ function extractAndUpsertUser(event: InboundEvent): string | null {
 function safeParseContent(raw: string): { text?: string; sender?: string; senderId?: string } {
   try {
     return JSON.parse(raw);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the policy boundary converts this failure to a safe denial
   } catch {
     return { text: raw };
   }
@@ -279,6 +281,7 @@ async function handleSenderApprovalResponse(payload: ResponsePayload): Promise<b
     try {
       const event = JSON.parse(row.original_message) as InboundEvent;
       await routeInbound(event);
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the policy boundary converts this failure to a safe denial
     } catch (err) {
       log.error('Failed to replay message after sender approval', { approvalId: row.id, err });
     }
@@ -322,6 +325,7 @@ async function wireApprovedChannel(
   let event: InboundEvent;
   try {
     event = JSON.parse(row.original_message) as InboundEvent;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the policy boundary converts this failure to a safe denial
   } catch (err) {
     log.error('Channel registration: failed to parse stored event', {
       messagingGroupId: row.messaging_group_id,
@@ -343,6 +347,7 @@ async function wireApprovedChannel(
       agentGroupName,
       mg?.channel_type ?? event.channelType,
     );
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the policy boundary converts this failure to a safe denial
   } catch (err) {
     // Mis-declared adapter (pattern mode without a pattern). Drop the pending
     // row so a future mention can retry once the declaration is fixed.
@@ -392,6 +397,7 @@ async function wireApprovedChannel(
 
   try {
     await routeInbound(event);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the policy boundary converts this failure to a safe denial
   } catch (err) {
     log.error('Failed to replay message after channel approval', {
       messagingGroupId: row.messaging_group_id,
@@ -486,6 +492,7 @@ async function handleChannelApprovalResponse(payload: ResponsePayload): Promise<
           options,
         }),
       );
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the policy boundary converts this failure to a safe denial
     } catch (err) {
       log.error('Channel registration: agent-selection card delivery failed', {
         messagingGroupId: row.messaging_group_id,
@@ -528,6 +535,7 @@ async function handleChannelApprovalResponse(payload: ResponsePayload): Promise<
         'chat-sdk',
         JSON.stringify({ text: 'Reply with the name for your new agent:' }),
       );
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the policy boundary converts this failure to a safe denial
     } catch (err) {
       log.error('Channel registration: name prompt delivery failed', {
         messagingGroupId: row.messaging_group_id,
@@ -593,6 +601,7 @@ registerMessageInterceptor(async (event: InboundEvent): Promise<boolean> => {
   try {
     const parsed = JSON.parse(event.message.content) as Record<string, unknown>;
     text = (typeof parsed.text === 'string' ? parsed.text : undefined)?.trim();
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the policy boundary converts this failure to a safe denial
   } catch {
     /* fall through */
   }

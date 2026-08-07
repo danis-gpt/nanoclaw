@@ -219,6 +219,7 @@ describe('channel registry — instance keying', () => {
         undefined,
         'slack',
       );
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the test intentionally exercises a handled failure
     } catch (err) {
       caught = err;
     }

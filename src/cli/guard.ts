@@ -37,6 +37,7 @@ export function commandGuardSpec(cmd: CommandDef): GuardedActionSpec {
       try {
         const payload = JSON.parse(grant.payload) as { frame?: { command?: string } };
         return payload.frame?.command === cmd.name;
+        // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
       } catch {
         return false;
       }

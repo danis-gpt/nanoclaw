@@ -163,6 +163,7 @@ export async function dispatch(
   let parsed: unknown;
   try {
     parsed = cmd.parseArgs(req.args);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch (e) {
     return err(req.id, 'invalid-args', errMsg(e));
   }
@@ -214,11 +215,13 @@ export async function dispatch(
     if (cmd.formatHuman) {
       try {
         return { id: req.id, ok: true, data, human: cmd.formatHuman(data) };
+        // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
       } catch {
         // fall through to the plain frame
       }
     }
     return { id: req.id, ok: true, data };
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch (e) {
     return err(req.id, 'handler-error', errMsg(e));
   }

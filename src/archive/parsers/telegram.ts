@@ -52,6 +52,7 @@ export async function streamTelegramExport(filePath: string, cb: TelegramCallbac
           }
           if (cb.onChatEnd) await cb.onChatEnd(chatHeader);
           done();
+          // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
         } catch (err) {
           done(err as Error);
         }

@@ -139,6 +139,7 @@ async function sweep(): Promise<void> {
   // lockdown is disabled.
   try {
     ensureEgressNetwork();
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
   } catch (err) {
     log.error('Egress lockdown re-heal failed', { err });
   }
@@ -148,6 +149,7 @@ async function sweep(): Promise<void> {
     for (const session of sessions) {
       await sweepSession(session);
     }
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
   } catch (err) {
     log.error('Host sweep error', { err });
   }
@@ -159,6 +161,7 @@ async function sweep(): Promise<void> {
   try {
     const { sweepAwaitingReasonRejects } = await import('./modules/approvals/index.js');
     await sweepAwaitingReasonRejects();
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
   } catch (err) {
     log.error('Reject-with-reason sweep failed', { err });
   }
@@ -187,12 +190,14 @@ async function sweepSession(session: Session): Promise<void> {
   let outDb: Database.Database | null = null;
   try {
     inDb = openInboundDb(agentGroup.id, session.id);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
   } catch {
     return;
   }
 
   try {
     outDb = openOutboundDb(agentGroup.id, session.id);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
   } catch {
     // outbound.db might not exist yet (container hasn't started)
   }
@@ -271,6 +276,7 @@ function heartbeatMtimeMs(agentGroupId: string, sessionId: string): number {
   const hbPath = heartbeatPath(agentGroupId, sessionId);
   try {
     return fs.statSync(hbPath).mtimeMs;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
   } catch {
     return 0;
   }
@@ -376,6 +382,7 @@ function resetStuckProcessingRows(
     if (cleared > 0) {
       log.info('Cleared orphan processing claims', { sessionId: session.id, cleared, reason });
     }
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
   } catch (err) {
     log.warn('Failed to clear orphan processing claims', { sessionId: session.id, err });
   } finally {

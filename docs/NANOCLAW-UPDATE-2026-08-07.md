@@ -70,9 +70,11 @@ Telegram (Brama, Aura, Radar, Vektor) / local CLI socket
   `quick_check` with zero failures.
 - Host suite: 1,417 passed, 3 skipped, 0 failed. Agent runner: 171 passed,
   1 skipped, 0 failed. Both TypeScript checks passed.
-- The general lint command still reports 13 errors and 214 warnings in older
-  local channel/circuit-breaker code; this is pre-existing debt and was not
-  introduced by the update.
+- Legacy ESLint debt is resolved: `pnpm lint` reports zero errors and zero
+  warnings. All 16 explicit `any` sites were typed, blocking error-handling
+  violations were corrected, and 194 intentional resilience catches now carry
+  local rationale. The catch-all rule is promoted from warning to error so new
+  undocumented catches fail CI.
 
 ## Versions
 

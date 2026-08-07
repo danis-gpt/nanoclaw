@@ -40,6 +40,7 @@ export function guard(action: GuardedAction, input: GuardInput): GuardDecision {
   let decision: GuardDecision;
   try {
     decision = action.decide(input);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the policy boundary converts this failure to a safe denial
   } catch (err) {
     log.error('Guard evaluation threw — failing closed', { action: action.action, err });
     return DENY('guard failure (failing closed)');

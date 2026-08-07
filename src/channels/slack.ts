@@ -21,6 +21,7 @@ registerChannelAdapter('slack', {
       try {
         const info = await slackAdapter.fetchThread(platformId);
         return (info as { channelName?: string }).channelName ?? null;
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch {
         return null;
       }

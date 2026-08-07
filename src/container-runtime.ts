@@ -80,6 +80,7 @@ export function cleanupOrphans(): boolean {
     for (const name of orphans) {
       try {
         stopContainer(name);
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
       } catch {
         /* already stopped */
       }
@@ -88,6 +89,7 @@ export function cleanupOrphans(): boolean {
       log.info('Stopped orphaned containers', { count: orphans.length, names: orphans });
     }
     return true;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
   } catch (err) {
     log.warn('Failed to clean up orphaned containers', { err });
     return false;

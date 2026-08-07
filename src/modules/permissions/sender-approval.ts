@@ -140,6 +140,7 @@ export async function requestSenderApproval(input: RequestSenderApprovalInput): 
       messagingGroupId,
       agentGroupId,
     });
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the policy boundary converts this failure to a safe denial
   } catch (err) {
     log.error('Unknown-sender approval card delivery failed', {
       approvalId,
