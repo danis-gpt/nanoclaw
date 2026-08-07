@@ -6,6 +6,7 @@ import { touchHeartbeat } from '../db/connection.js';
 
 const SCRIPT_TIMEOUT_MS = 30_000;
 const SCRIPT_MAX_BUFFER = 1024 * 1024;
+const AGENT_WORKSPACE = '/workspace/agent';
 
 export interface ScriptResult {
   wakeAgent: boolean;
@@ -16,7 +17,11 @@ function log(msg: string): void {
   console.error(`[task-script] ${msg}`);
 }
 
-export async function runScript(script: string, taskId: string): Promise<ScriptResult | null> {
+export async function runScript(
+  script: string,
+  taskId: string,
+  workingDirectory: string = fs.existsSync(AGENT_WORKSPACE) ? AGENT_WORKSPACE : process.cwd(),
+): Promise<ScriptResult | null> {
   const scriptPath = path.join('/tmp', `task-script-${taskId}.sh`);
   fs.writeFileSync(scriptPath, script, { mode: 0o755 });
 
@@ -24,7 +29,7 @@ export async function runScript(script: string, taskId: string): Promise<ScriptR
     execFile(
       'bash',
       [scriptPath],
-      { timeout: SCRIPT_TIMEOUT_MS, maxBuffer: SCRIPT_MAX_BUFFER, env: process.env },
+      { cwd: workingDirectory, timeout: SCRIPT_TIMEOUT_MS, maxBuffer: SCRIPT_MAX_BUFFER, env: process.env },
       (error, stdout, stderr) => {
         try {
           fs.unlinkSync(scriptPath);

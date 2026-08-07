@@ -12,10 +12,13 @@
  * own test goes red.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from '../db/connection.js';
 import { getPendingMessages, markScriptSkipped } from '../db/messages-in.js';
-import { applyPreTaskScripts } from './task-script.js';
+import { applyPreTaskScripts, runScript } from './task-script.js';
 
 beforeEach(() => {
   initTestSessionDb();
@@ -39,6 +42,21 @@ const ackStatus = (id: string): string | undefined =>
     ?.status;
 
 describe('script-skip ack chain (container leg)', () => {
+  it('runs relative script paths from the mounted agent workspace', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-task-workspace-'));
+    try {
+      fs.writeFileSync(path.join(workspace, 'probe.json'), '{"source":"agent-workspace"}');
+      const result = await runScript(
+        `printf '{"wakeAgent":true,"data":'; cat probe.json; printf '}'`,
+        't-relative',
+        workspace,
+      );
+      expect(result).toEqual({ wakeAgent: true, data: { source: 'agent-workspace' } });
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   it('an erroring script skips with reason "error" and acks script-skip:error', async () => {
     insertTask('t-err', 'echo boom >&2; exit 1');
     const { keep, skipped } = await applyPreTaskScripts(getPendingMessages());
