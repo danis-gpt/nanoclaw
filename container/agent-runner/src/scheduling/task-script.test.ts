@@ -79,6 +79,13 @@ describe('script-skip ack chain (container leg)', () => {
     expect(ackStatus('t-gated')).toBe('completed');
   });
 
+  it('a fully gated batch arms the poll loop idle tracker', () => {
+    const source = fs.readFileSync(new URL('../poll-loop.ts', import.meta.url), 'utf8');
+    expect(source).toMatch(
+      /if \(keep\.length === 0\) \{[\s\S]{0,500}idle\.markActivity\(\);[\s\S]{0,100}continue;/,
+    );
+  });
+
   it('wakeAgent=true keeps the task and enriches the prompt with script data', async () => {
     insertTask('t-wake', 'echo \'{"wakeAgent": true, "data": {"alerts": 2}}\'');
     const { keep, skipped } = await applyPreTaskScripts(getPendingMessages());

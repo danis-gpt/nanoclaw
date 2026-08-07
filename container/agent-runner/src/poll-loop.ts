@@ -128,6 +128,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
 
   const { idleTimeoutMs } = loadConfig();
   const idle = createIdleTracker(idleTimeoutMs);
+  log(`Idle timeout configured (${idleTimeoutMs}ms)`);
 
   let pollCount = 0;
   let isFirstPoll = true;
@@ -239,6 +240,11 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
 
     if (keep.length === 0) {
       log(`All ${normalMessages.length} non-command message(s) gated by script, skipping query`);
+      // A gated task is still a completed batch. Without recording activity,
+      // the idle tracker never observes any processed work and the task
+      // container remains alive forever after wakeAgent=false.
+      idle.markActivity();
+      log(`Gated batch completed — idle timeout armed (${idleTimeoutMs}ms)`);
       continue;
     }
 
