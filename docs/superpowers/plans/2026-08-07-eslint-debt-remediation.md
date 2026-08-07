@@ -60,8 +60,8 @@
 **Files:**
 - Modify: `docs/NANOCLAW-UPDATE-2026-08-07.md`
 
-- [ ] Record the zero-lint result and final verification counts.
-- [ ] Fast-forward `channels` only after the isolated branch is clean and all tests pass.
-- [ ] Restart only `nanoclaw-v2-a69a3d76.service` if changed host source is used by the running service.
-- [ ] Verify systemd status, fresh logs, Telegram `getMe`, OneCLI health, central DB integrity, and all session DB quick checks.
-- [ ] Preserve the worktree until post-deployment verification succeeds, then remove it and delete the merged branch.
+- [x] Record the zero-lint result and final verification counts.
+- [x] Fast-forward `channels` only after the isolated branch is clean and all tests pass.
+- [x] Restart only `nanoclaw-v2-a69a3d76.service` because the running service consumes the rebuilt host `dist`.
+- [x] Verify systemd status, fresh logs, Telegram `getMe`, OneCLI health, central DB integrity, and all session DB quick checks.
+- [x] Preserve the worktree until post-deployment verification succeeds, then remove it and delete the merged branch.

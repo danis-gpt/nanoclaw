@@ -2,11 +2,11 @@
 
 ## Result
 
-Production is running on local commit `d0431379`, which contains upstream
-`main` at `743e32df` plus the local channel, native Codex, migration, task
-workspace, and gated-task idle fixes. The published NanoClaw version remains
-`2.1.54`; this checkout additionally contains 23 upstream commits made after
-that release.
+Production code is running from local commit `e65d8cdc`, which contains the
+previously deployed `d0431379` fixes plus the completed ESLint debt
+remediation. Its upstream base remains `main` at `743e32df`. The published
+NanoClaw version remains `2.1.54`; this checkout additionally contains 23
+upstream commits made after that release.
 
 ## Deployed architecture
 
