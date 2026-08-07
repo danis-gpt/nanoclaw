@@ -26,7 +26,7 @@ export default [
         },
       ],
       'no-catch-all/no-catch-all': 'error',
-      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-explicit-any': 'error',
     },
   },
 ]

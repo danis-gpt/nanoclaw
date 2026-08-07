@@ -73,8 +73,8 @@ Telegram (Brama, Aura, Radar, Vektor) / local CLI socket
 - Legacy ESLint debt is resolved: `pnpm lint` reports zero errors and zero
   warnings. All 16 explicit `any` sites were typed, blocking error-handling
   violations were corrected, and 194 intentional resilience catches now carry
-  local rationale. The catch-all rule is promoted from warning to error so new
-  undocumented catches fail CI.
+  local rationale. Both catch-all and explicit-`any` rules are promoted from
+  warning to error so either regression fails CI.
 
 ## Versions
 

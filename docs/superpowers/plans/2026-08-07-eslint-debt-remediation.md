@@ -51,6 +51,7 @@
 - [x] For top-level channel, polling, webhook, delivery, and shutdown boundaries that must remain alive after arbitrary adapter failures, keep the catch-all and add a local directive explaining the resilience boundary.
 - [x] Do not disable `no-catch-all/no-catch-all` globally or by file override.
 - [x] Promote `no-catch-all/no-catch-all` from warning to error after the baseline is clean so new debt fails CI.
+- [x] Promote `@typescript-eslint/no-explicit-any` to error so typed-boundary debt cannot silently return.
 - [x] Run `pnpm lint`; expect zero errors and zero warnings.
 - [x] Run `pnpm typecheck`, the full host suite, and the full serial agent-runner suite.
 - [x] Include documented catch boundaries in the atomic remediation commit.
