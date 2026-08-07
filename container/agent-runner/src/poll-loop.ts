@@ -362,6 +362,7 @@ export async function processQuery(
   initialPrompt: string,
   initialContinuation: string | undefined,
   idleTimeoutMs: number = 0,
+  activePollIntervalMs: number = ACTIVE_POLL_INTERVAL_MS,
 ): Promise<QueryResult> {
   let queryContinuation: string | undefined;
   let done = false;
@@ -421,6 +422,9 @@ export async function processQuery(
         // host-generated welcome trigger with null thread vs a Discord DM reply).
         const newMessages = pending.filter((m) => m.kind !== 'system');
         if (newMessages.length === 0) return;
+
+        // Accumulated context must not engage a warm query by itself.
+        if (!newMessages.some((m) => m.trigger === 1)) return;
 
         const newIds = newMessages.map((m) => m.id);
         markProcessing(newIds);
@@ -492,7 +496,7 @@ export async function processQuery(
         pollInFlight = false;
       }
     })();
-  }, ACTIVE_POLL_INTERVAL_MS);
+  }, activePollIntervalMs);
 
   try {
     for await (const event of query.events) {

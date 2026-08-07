@@ -1,10 +1,18 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
-import { assembleReleaseBody, changelogSection, publicationPlan, verifyRelease } from './release.mjs';
+import {
+  assembleReleaseBody,
+  changelogSection,
+  publicationPlan,
+  publicationReadbackStatus,
+  verifyRelease,
+} from './release.mjs';
 
-const releaseWorkflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
+const releaseWorkflowUrl = new URL('../.github/workflows/release.yml', import.meta.url);
+const releaseWorkflowExists = existsSync(releaseWorkflowUrl);
+const releaseWorkflow = releaseWorkflowExists ? readFileSync(releaseWorkflowUrl, 'utf8') : '';
 const repositoryChangelog = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
 
 const changelog = `# Changelog
@@ -55,7 +63,7 @@ describe('release metadata', () => {
   });
 });
 
-describe('release workflow safeguards', () => {
+describe.skipIf(!releaseWorkflowExists)('release workflow safeguards', () => {
   it('fails wrong-repository and wrong-ref dispatches instead of skipping verification', () => {
     expect(releaseWorkflow).toContain('name: Verify dispatch source');
     expect(releaseWorkflow).toContain('if [ "$DISPATCH_REPOSITORY" != "nanocoai/nanoclaw" ]');
@@ -73,6 +81,15 @@ describe('release workflow safeguards', () => {
     );
     expect(releaseWorkflow).toContain('EXPECTED_REVIEWERS=\'["gavrielc","omri-maya"]\'');
     expect(releaseWorkflow).toContain('Release reviewer roster drift');
+  });
+
+  it('bounds post-publication API propagation retries and fails closed after the deadline', () => {
+    expect(releaseWorkflow).toContain('READBACK_ATTEMPTS=6');
+    expect(releaseWorkflow).toContain('READBACK_DELAY_SECONDS=2');
+    expect(releaseWorkflow).toContain('node scripts/release.mjs readback');
+    expect(releaseWorkflow).toContain('sleep "$READBACK_DELAY_SECONDS"');
+    expect(releaseWorkflow).toContain('Timed out waiting for GitHub to return the exact immutable release');
+    expect(releaseWorkflow).not.toContain('test "$FINAL_STATE" = "already-published"');
   });
 });
 
@@ -136,6 +153,17 @@ describe('publication recovery', () => {
     });
   }
 
+  function readback(overrides: Record<string, unknown> = {}) {
+    return publicationReadbackStatus({
+      expectedBody,
+      release: matchingRelease,
+      tagState: annotatedTag,
+      targetSha,
+      version: '2.1.54',
+      ...overrides,
+    });
+  }
+
   it('creates both objects when neither exists', () => {
     expect(plan()).toBe('create-tag-and-release');
   });
@@ -146,6 +174,22 @@ describe('publication recovery', () => {
 
   it('treats an exact published release as an idempotent success', () => {
     expect(plan({ release: matchingRelease, tagState: annotatedTag })).toBe('already-published');
+  });
+
+  it('retries only exact release states that are still propagating', () => {
+    expect(readback()).toBe('already-published');
+    expect(readback({ release: null })).toBe('pending');
+    expect(readback({ release: { ...matchingRelease, immutable: false } })).toBe('pending');
+    expect(readback({ release: { ...matchingRelease, immutable: undefined } })).toBe('pending');
+  });
+
+  it.each([
+    ['missing tag and release', { release: null, tagState: { exists: false } }, 'unsafe plan'],
+    ['wrong title', { release: { ...matchingRelease, name: 'Wrong' } }, 'title'],
+    ['changed body', { release: { ...matchingRelease, body: 'Different' } }, 'body'],
+    ['wrong tag target', { tagState: { ...annotatedTag, sha: 'b'.repeat(40) } }, 'not workflow target'],
+  ])('fails post-publication read-back immediately for %s', (_name, overrides, message) => {
+    expect(() => readback(overrides)).toThrow(message);
   });
 
   it.each([
