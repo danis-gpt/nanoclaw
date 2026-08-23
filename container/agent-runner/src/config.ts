@@ -7,6 +7,8 @@
  */
 import fs from 'fs';
 
+import type { McpServerConfig } from './providers/types.js';
+
 const CONFIG_PATH = '/workspace/agent/container.json';
 
 export interface RunnerConfig {
@@ -17,7 +19,7 @@ export interface RunnerConfig {
   maxMessagesPerPrompt: number;
   /** Idle window after completed work; 0 disables clean idle exit. */
   idleTimeoutMs: number;
-  mcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> }>;
+  mcpServers: Record<string, McpServerConfig>;
   model?: string;
   effort?: string;
 }
