@@ -220,7 +220,13 @@ describe('origin metadata (from= attribute)', () => {
       .run(name, name, channelType, platformId);
   }
 
-  function insertWithRouting(id: string, kind: string, content: object, channelType: string | null, platformId: string | null): void {
+  function insertWithRouting(
+    id: string,
+    kind: string,
+    content: object,
+    channelType: string | null,
+    platformId: string | null,
+  ): void {
     getInboundDb()
       .prepare(
         `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, content)
@@ -517,9 +523,9 @@ const TASK_ROUTING = {
 
 function taskLogRows(): Array<{ text: string }> {
   return (
-    getOutboundDb()
-      .prepare("SELECT content FROM messages_out WHERE kind = 'task_log' ORDER BY seq")
-      .all() as Array<{ content: string }>
+    getOutboundDb().prepare("SELECT content FROM messages_out WHERE kind = 'task_log' ORDER BY seq").all() as Array<{
+      content: string;
+    }>
   ).map((r) => JSON.parse(r.content) as { text: string });
 }
 
@@ -542,6 +548,10 @@ describe('task-run turn wiring (real processQuery)', () => {
 
   it('logs and conditionally nudges a second task run in the same open query', async () => {
     const pushes: string[] = [];
+    let resolveFollowUp!: () => void;
+    const followUpPushed = new Promise<void>((resolve) => {
+      resolveFollowUp = resolve;
+    });
 
     async function* events(): AsyncGenerator<ProviderEvent> {
       yield { type: 'init', continuation: 's1' };
@@ -552,10 +562,7 @@ describe('task-run turn wiring (real processQuery)', () => {
       // A SECOND task run lands while the query is open — the follow-up poller
       // pushes it and must reset the per-turn correction state.
       insertMessage('t2', 'task', { prompt: 'fire two' });
-      const deadline = Date.now() + 2000;
-      while (!pushes.some((p) => p.includes('fire two')) && Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 50));
-      }
+      await followUpPushed;
 
       // Turn 2 repeats the mistake. This receives a second independent nudge
       // only if the follow-up path reset taskBlockNudged.
@@ -566,6 +573,7 @@ describe('task-run turn wiring (real processQuery)', () => {
     const query: AgentQuery = {
       push: (m: string) => {
         pushes.push(m);
+        if (m.includes('<task') && m.includes('fire two')) resolveFollowUp();
       },
       end: () => {},
       events: events(),
@@ -587,5 +595,5 @@ describe('task-run turn wiring (real processQuery)', () => {
     expect(logs[1]).toContain('[undelivered → local-cli] fire two result');
     expect(logs).not.toContain('first delivery decision handled');
     expect(logs).not.toContain('second delivery decision handled');
-  });
+  }, 10_000);
 });
