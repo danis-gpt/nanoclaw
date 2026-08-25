@@ -856,6 +856,83 @@ describe('router — per-wiring thread policy', () => {
     },
   });
 
+  it('routes an exact forum topic only to the wiring with the matching thread_filter', async () => {
+    createAgentGroup({
+      id: 'ag-tp-2',
+      name: 'Second Thread Agent',
+      folder: 'second-thread-agent',
+      agent_provider: null,
+      created_at: now(),
+    });
+    createMessagingGroupAgent({
+      id: 'mga-tp-2',
+      messaging_group_id: 'mg-tp',
+      agent_group_id: 'ag-tp-2',
+      engage_mode: 'pattern',
+      engage_pattern: '.',
+      sender_scope: 'all',
+      ignored_message_policy: 'drop',
+      session_mode: 'shared',
+      priority: 0,
+      created_at: now(),
+    });
+    getDb()
+      .prepare(
+        "UPDATE messaging_group_agents SET thread_filter = ?, ignored_message_policy = 'accumulate' WHERE id = ?",
+      )
+      .run('telegram:-100123:101', 'mga-tp');
+    getDb()
+      .prepare('UPDATE messaging_group_agents SET thread_filter = ? WHERE id = ?')
+      .run('telegram:-100123:102', 'mga-tp-2');
+
+    await withThreadedAdapter(async () => {
+      const { routeInbound } = await import('./router.js');
+      const { getSessionsByAgentGroup } = await import('./db/sessions.js');
+
+      await routeInbound({
+        ...threadedEvent('msg-topic-102'),
+        threadId: 'telegram:-100123:102',
+      });
+
+      // A nonmatching filter is a hard routing boundary: it must not even
+      // accumulate silent context for the other domain agent.
+      expect(getSessionsByAgentGroup('ag-tp')).toHaveLength(0);
+      expect(getSessionsByAgentGroup('ag-tp-2')).toHaveLength(1);
+    });
+  });
+
+  it('preserves existing fanout behavior when thread_filter is null', async () => {
+    createAgentGroup({
+      id: 'ag-tp-2',
+      name: 'Second Thread Agent',
+      folder: 'second-thread-agent',
+      agent_provider: null,
+      created_at: now(),
+    });
+    createMessagingGroupAgent({
+      id: 'mga-tp-2',
+      messaging_group_id: 'mg-tp',
+      agent_group_id: 'ag-tp-2',
+      engage_mode: 'pattern',
+      engage_pattern: '.',
+      sender_scope: 'all',
+      ignored_message_policy: 'drop',
+      session_mode: 'shared',
+      priority: 0,
+      created_at: now(),
+    });
+
+    await withThreadedAdapter(async () => {
+      const { routeInbound } = await import('./router.js');
+      const { getSessionsByAgentGroup } = await import('./db/sessions.js');
+
+      await routeInbound(threadedEvent('msg-null-filter-fanout'));
+
+      expect(getSessionsByAgentGroup('ag-tp')).toHaveLength(1);
+      expect(getSessionsByAgentGroup('ag-tp-2')).toHaveLength(1);
+    });
+  });
+
   it('NULL-threads wiring (inherit) on a threaded adapter keeps thread routing as before', async () => {
     await withThreadedAdapter(async () => {
       const { routeInbound } = await import('./router.js');

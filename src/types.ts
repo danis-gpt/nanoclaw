@@ -135,6 +135,8 @@ export interface MessagingGroupAgent {
    * updating.
    */
   threads?: number | null;
+  /** Exact platform thread/topic id. NULL means all threads for this wiring. */
+  thread_filter?: string | null;
   created_at: string;
 }
 

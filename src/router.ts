@@ -170,8 +170,8 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
     if (await intercept(event)) return;
   }
 
-  // 0. Apply the adapter's thread policy. Non-threaded adapters (Telegram,
-  //    WhatsApp, iMessage, email) collapse threads to the channel. Resolved
+  // 0. Apply the adapter's thread policy. Non-threaded adapters (WhatsApp,
+  //    iMessage, email) collapse threads to the channel. Resolved
   //    by the RECEIVING instance — sibling instances of one platform can
   //    differ in thread support.
   const adapter = getChannelAdapter(event.instance ?? event.channelType);
@@ -329,6 +329,19 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
       supportsThreads,
     );
     const effectiveThreadId = threadsEnabled ? event.threadId : null;
+
+    if (
+      agent.thread_filter !== null &&
+      agent.thread_filter !== undefined &&
+      agent.thread_filter !== effectiveThreadId
+    ) {
+      log.debug('Message skipped by wiring thread filter', {
+        agentGroupId: agent.agent_group_id,
+        expectedThreadId: agent.thread_filter,
+        actualThreadId: effectiveThreadId,
+      });
+      continue;
+    }
 
     const engages = evaluateEngage(agent, messageText, isMention, mg, effectiveThreadId);
 

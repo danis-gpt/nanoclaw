@@ -75,6 +75,22 @@ describe('migrations', () => {
     expect(col!.dflt_value).toBeNull();
   });
 
+  it('adds a nullable exact thread filter and its lookup index (023)', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    const col = db
+      .prepare(
+        `SELECT type, "notnull", dflt_value FROM pragma_table_info('messaging_group_agents') WHERE name = 'thread_filter'`,
+      )
+      .get() as { type: string; notnull: number; dflt_value: unknown } | undefined;
+    expect(col).toEqual({ type: 'TEXT', notnull: 0, dflt_value: null });
+
+    const index = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_mga_messaging_group_thread_filter'`)
+      .get();
+    expect(index).toEqual({ name: 'idx_mga_messaging_group_thread_filter' });
+  });
+
   it('persists approval card bodies for terminal rendering (021)', () => {
     const db = initTestDb();
     runMigrations(db);
@@ -222,6 +238,11 @@ describe('messaging group agents', () => {
     const results = getMessagingGroupAgents('mg-1');
     expect(results).toHaveLength(1);
     expect(results[0].agent_group_id).toBe('ag-1');
+  });
+
+  it('should persist an exact thread filter on a wiring', () => {
+    createMessagingGroupAgent({ ...mga(), thread_filter: 'telegram:-100123:101' });
+    expect(getMessagingGroupAgent('mga-1')!.thread_filter).toBe('telegram:-100123:101');
   });
 
   it('should order by priority descending', () => {

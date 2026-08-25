@@ -66,13 +66,19 @@ CREATE TABLE messaging_group_agents (
   ignored_message_policy TEXT NOT NULL DEFAULT 'drop',   -- 'drop' | 'accumulate'
   session_mode           TEXT DEFAULT 'shared',
   priority               INTEGER DEFAULT 0,
+  threads                INTEGER,
+  thread_filter          TEXT,
   created_at             TEXT NOT NULL,
   UNIQUE(messaging_group_id, agent_group_id)
 );
+CREATE INDEX idx_mga_messaging_group_thread_filter
+  ON messaging_group_agents(messaging_group_id, thread_filter);
 ```
 
 - `session_mode`: `shared` (one session per channel), `per-thread` (one per thread), `agent-shared` (one per agent group across all channels).
 - `engage_mode` / `engage_pattern` / `sender_scope` / `ignored_message_policy`: four orthogonal axes (migration 010) that replaced v1's opaque `trigger_rules` JSON + `response_scope` enum. `engage_mode='pattern'` requires `engage_pattern` (`'.'` matches every message — the "always respond" flavor); `sender_scope='known'` restricts engagement to group members; `ignored_message_policy='accumulate'` keeps ignored messages as context instead of dropping them.
+- `threads`: nullable per-wiring override. `NULL` inherits the adapter's DM/group declaration; `1` preserves platform thread IDs and `0` collapses them, bounded by the adapter's actual thread capability.
+- `thread_filter`: nullable exact platform thread/topic ID (migration 023). `NULL` keeps legacy fanout. A non-NULL value is compared after thread-policy resolution and before engagement, access, accumulation, session creation, and container wake. Telegram forum values use the complete adapter ID (`telegram:<chat_id>:<topic_id>`), not only the numeric topic ID. Duplicate non-NULL filters are allowed and intentionally fan out, so single-domain deployments must audit them operationally.
 - **Side effect:** creating a wiring must also populate `agent_destinations` — don't mutate one without the other (see §1.10).
 
 ### 1.4 `users`
@@ -434,7 +440,9 @@ Several early migrations were later renamed/retired and replaced by "module" fil
 | 18 | `approvals-approver-user-id` | `018-approvals-approver-user-id.ts` | `pending_approvals.approver_user_id` — names a single required approver for a2a message-gate policies |
 | 19 | `wiring-threads-override` | `019-wiring-threads.ts` | `messaging_group_agents.threads` — per-wiring thread-policy override (NULL = adapter default) |
 | 20 | `container-config-timezone` | `020-container-config-timezone.ts` | `container_configs.timezone` — per-agent-group timezone override (NULL = install-global) |
-| 21 | `approval-question-render-metadata` | `021-approval-question.ts` | `question` card-body column on all three approval tables so terminal edits retain the original request |
+| 21 | `container-idle-timeout` | `021-container-idle-timeout.ts` | `container_configs.idle_timeout_ms` — per-agent-group idle timeout override |
+| 22 | `approval-question-render-metadata` | `022-approval-question.ts` | `question` card-body column on all three approval tables so terminal edits retain the original request |
+| 23 | `wiring-thread-filter` | `023-wiring-thread-filter.ts` | `messaging_group_agents.thread_filter` plus its messaging-group lookup index |
 
 Numbers 5 and 6 are intentionally absent — migrations were renumbered during early development.
 

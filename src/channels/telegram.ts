@@ -14,11 +14,26 @@ import { upsertUser } from '../modules/permissions/db/users.js';
 import { createChatSdkBridge, type ReplyContext } from './chat-sdk-bridge.js';
 import { sanitizeTelegramLegacyMarkdown } from './telegram-markdown-sanitize.js';
 import { registerChannelAdapter } from './channel-registry.js';
-import type { ChannelAdapter, ChannelSetup, InboundMessage } from './adapter.js';
+import type { ChannelAdapter, ChannelDefaults, ChannelSetup, InboundMessage } from './adapter.js';
 import { tryConsume } from './telegram-pairing.js';
 
 const TELEGRAM_CHANNEL_TYPE = 'telegram';
 const DEFAULT_BOT_ALIAS = 'default';
+
+const TELEGRAM_DEFAULTS: ChannelDefaults = {
+  dm: {
+    engageMode: 'pattern',
+    engagePattern: '.',
+    threads: false,
+    unknownSenderPolicy: 'request_approval',
+  },
+  group: {
+    engageMode: 'mention-sticky',
+    threads: true,
+    unknownSenderPolicy: 'request_approval',
+  },
+  mentions: 'platform',
+};
 
 const TELEGRAM_BOT_CONFIGS = [
   { alias: DEFAULT_BOT_ALIAS, envKey: 'TELEGRAM_BOT_TOKEN', legacyEnvKey: undefined },
@@ -291,7 +306,8 @@ function createSingleTelegramBridge(config: TelegramBotConfig): TelegramBotBridg
     adapter: telegramAdapter,
     concurrency: 'concurrent',
     extractReplyContext,
-    supportsThreads: false,
+    supportsThreads: true,
+    defaults: TELEGRAM_DEFAULTS,
     transformOutboundText: sanitizeTelegramLegacyMarkdown,
     maxTextLength: 4000,
   });
@@ -330,7 +346,8 @@ function createTelegramMultiplexer(botConfigs: TelegramBotConfig[]): ChannelAdap
     ...defaultBridge.bridge,
     name: TELEGRAM_CHANNEL_TYPE,
     channelType: TELEGRAM_CHANNEL_TYPE,
-    supportsThreads: false,
+    supportsThreads: true,
+    defaults: TELEGRAM_DEFAULTS,
 
     async setup(hostConfig: ChannelSetup) {
       for (const bridge of bridges) {
@@ -401,6 +418,7 @@ function createTelegramMultiplexer(botConfigs: TelegramBotConfig[]): ChannelAdap
 }
 
 registerChannelAdapter('telegram', {
+  defaults: TELEGRAM_DEFAULTS,
   factory: () => {
     const env = readEnvFile(TELEGRAM_BOT_CONFIGS.flatMap((config) => [config.envKey, config.legacyEnvKey ?? '']));
     const botConfigs = TELEGRAM_BOT_CONFIGS.flatMap((config): TelegramBotConfig[] => {

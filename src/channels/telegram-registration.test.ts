@@ -23,12 +23,27 @@
  * drift, not this test. Every Chat SDK channel follows this same shape.
  */
 import { describe, it, expect } from 'vitest';
+import { createTelegramAdapter } from '@chat-adapter/telegram';
 
-import { getRegisteredChannelNames } from './channel-registry.js';
+import { getChannelDefaults, getRegisteredChannelNames } from './channel-registry.js';
 import './index.js'; // the real barrel — triggers every channel's self-registration
 
 describe('telegram channel registration', () => {
   it('registers telegram via the channel barrel', () => {
     expect(getRegisteredChannelNames()).toContain('telegram');
+  });
+
+  it('declares forum topics for groups without splitting direct-message sessions', () => {
+    const defaults = getChannelDefaults('telegram', 'telegram');
+    expect(defaults.group.threads).toBe(true);
+    expect(defaults.dm.threads).toBe(false);
+  });
+
+  it('encodes a forum topic as the full platform thread id used by thread_filter', () => {
+    const adapter = createTelegramAdapter({ botToken: 'test-token', mode: 'polling' });
+    const threadId = adapter.encodeThreadId({ chatId: '-100123', messageThreadId: 101 });
+
+    expect(threadId).toBe('telegram:-100123:101');
+    expect(adapter.channelIdFromThreadId(threadId)).toBe('telegram:-100123');
   });
 });

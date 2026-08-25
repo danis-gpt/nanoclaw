@@ -173,15 +173,15 @@ export function createMessagingGroupAgent(mga: MessagingGroupAgent): void {
       `INSERT INTO messaging_group_agents (
          id, messaging_group_id, agent_group_id,
          engage_mode, engage_pattern, sender_scope, ignored_message_policy,
-         session_mode, priority, created_at
+         session_mode, priority, threads, thread_filter, created_at
        )
        VALUES (
          @id, @messaging_group_id, @agent_group_id,
          @engage_mode, @engage_pattern, @sender_scope, @ignored_message_policy,
-         @session_mode, @priority, @created_at
+         @session_mode, @priority, @threads, @thread_filter, @created_at
        )`,
     )
-    .run(mga);
+    .run({ ...mga, threads: mga.threads ?? null, thread_filter: mga.thread_filter ?? null });
 
   ensureAgentDestinationForWiring(mga);
 }
@@ -265,7 +265,14 @@ export function updateMessagingGroupAgent(
   updates: Partial<
     Pick<
       MessagingGroupAgent,
-      'engage_mode' | 'engage_pattern' | 'sender_scope' | 'ignored_message_policy' | 'session_mode' | 'priority'
+      | 'engage_mode'
+      | 'engage_pattern'
+      | 'sender_scope'
+      | 'ignored_message_policy'
+      | 'session_mode'
+      | 'priority'
+      | 'threads'
+      | 'thread_filter'
     >
   >,
 ): void {

@@ -176,6 +176,69 @@ describe('wirings — threads and priority columns', () => {
   });
 });
 
+describe('wirings — exact thread filter', () => {
+  it('creates a wiring with --thread-filter', async () => {
+    const row = await create({
+      messaging_group_id: 'mg-group',
+      agent_group_id: 'ag-1',
+      thread_filter: 'telegram:-100123:101',
+    });
+
+    expect(getMessagingGroupAgent(row.id as string)!.thread_filter).toBe('telegram:-100123:101');
+  });
+
+  it('rejects a conflicting thread filter when the wiring already exists', async () => {
+    const existing = await create({ messaging_group_id: 'mg-group', agent_group_id: 'ag-1' });
+
+    await expect(
+      create({
+        messaging_group_id: 'mg-group',
+        agent_group_id: 'ag-1',
+        thread_filter: 'telegram:-100123:101',
+      }),
+    ).rejects.toThrow(/already exists.*wirings update/i);
+    expect(getMessagingGroupAgent(existing.id as string)!.thread_filter).toBeNull();
+  });
+
+  it('updates thread_filter without changing engagement fields', async () => {
+    const row = await create({
+      messaging_group_id: 'mg-group',
+      agent_group_id: 'ag-1',
+      engage_mode: 'mention',
+      sender_scope: 'known',
+    });
+
+    const updated = await update({ id: row.id, thread_filter: 'telegram:-100123:102' });
+
+    expect(updated.thread_filter).toBe('telegram:-100123:102');
+    expect(updated.engage_mode).toBe('mention');
+    expect(updated.sender_scope).toBe('known');
+  });
+
+  it('clears thread_filter only with an explicit null operation', async () => {
+    const row = await create({
+      messaging_group_id: 'mg-group',
+      agent_group_id: 'ag-1',
+      thread_filter: 'telegram:-100123:103',
+    });
+
+    await expect(update({ id: row.id, thread_filter: undefined })).rejects.toThrow(/nothing to update/);
+    // This is the exact value produced by the shell CLI invocation
+    // `ncl wirings update <id> --thread-filter null`.
+    const cleared = await update({ id: row.id, thread_filter: 'null' });
+    expect(cleared.thread_filter).toBeNull();
+  });
+
+  it('rejects empty and system-prefixed thread filters', async () => {
+    await expect(
+      create({ messaging_group_id: 'mg-group', agent_group_id: 'ag-1', thread_filter: '   ' }),
+    ).rejects.toThrow(/non-empty platform thread id/);
+    await expect(
+      create({ messaging_group_id: 'mg-group', agent_group_id: 'ag-1', thread_filter: 'system:tasks:weekly' }),
+    ).rejects.toThrow(/non-empty platform thread id/);
+  });
+});
+
 describe('wirings-update — same validation as create', () => {
   it('rejects switching to pattern mode when no engage_pattern exists', async () => {
     const row = await create({ messaging_group_id: 'mg-group', agent_group_id: 'ag-1' }); // sticky, no pattern

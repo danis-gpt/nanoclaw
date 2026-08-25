@@ -80,7 +80,7 @@ agent_groups (workspace, memory, CLAUDE.md, personality)
     ↕ many-to-many
 messaging_groups (a specific channel/chat/group on a platform)
     via
-messaging_group_agents (session_mode, engage_mode, engage_pattern, sender_scope, ignored_message_policy, priority, threads)
+messaging_group_agents (session_mode, engage_mode, engage_pattern, sender_scope, ignored_message_policy, priority, threads, thread_filter)
 ```
 
 Wiring-creation defaults for engage mode/pattern, thread policy, and unknown-sender policy come from the channel adapter's declaration (per DM/group context), overridable per wiring at creation — see [setup-wiring.md](setup-wiring.md#channel-defaults-two-level-model) and [api-details.md](api-details.md#channel-defaults).
@@ -88,3 +88,46 @@ Wiring-creation defaults for engage mode/pattern, thread policy, and unknown-sen
 - **Shared session:** multiple messaging_groups → same agent_group, `session_mode = 'agent-shared'`
 - **Same agent, separate sessions:** multiple messaging_groups → same agent_group, `session_mode = 'shared'`
 - **Separate agents:** each messaging_group → different agent_group
+
+## Exact Topic Routing
+
+One threaded messaging group can route individual platform threads or topics
+to separate agent groups by setting an exact `thread_filter` on each wiring.
+This is useful for a private Telegram forum whose topics represent separate
+domains, while retaining separate agent workspaces and session databases.
+
+```text
+Telegram forum
+  telegram:-100123:101 -> product agent
+  telegram:-100123:102 -> engineering agent
+```
+
+The filter stores the adapter's complete thread ID, not only Telegram's numeric
+`message_thread_id`. For Telegram the value is
+`telegram:<chat_id>:<topic_id>`. Build it only from the verified chat ID and the
+topic ID returned by Telegram.
+
+Routing invariants:
+
+- `thread_filter IS NULL` preserves the legacy behavior and routes every thread
+  that otherwise engages the wiring.
+- A non-NULL filter is an exact string comparison. It has no regex, wildcard,
+  prefix, or comma-list semantics.
+- The filter is evaluated independently for each wiring before engagement,
+  sender/access gates, silent accumulation, session creation, or container wake.
+  A nonmatching topic therefore cannot enter another domain agent's context,
+  including when that wiring uses `ignored_message_policy='accumulate'`.
+- Missing thread IDs and a wiring whose thread policy is disabled fail closed:
+  they cannot match a non-NULL filter.
+- There is no implicit general-topic fallback. Wire the default/general topic
+  explicitly or let it drop.
+- Two wirings with the same non-NULL filter intentionally fan out to both
+  agents. Deployments that require one topic per domain must audit uniqueness
+  before activation and after every wiring change.
+- Deleting and recreating a Telegram topic changes its ID. The old wiring then
+  fails closed until an operator verifies and updates the new full thread ID.
+
+Topic routing separates inbound conversation context, but it is not a complete
+credential boundary. Confidential domains still need separate agent groups,
+workspace mounts, provider state, and least-privilege GitHub/Plane/Outline
+credentials.

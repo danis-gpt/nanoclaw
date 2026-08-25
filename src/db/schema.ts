@@ -58,6 +58,8 @@ CREATE TABLE messaging_group_agents (
   threads                INTEGER, -- NULL = inherit the channel adapter's declared
                                   -- thread default; 1/0 = per-wiring override
                                   -- (migration 019)
+  thread_filter          TEXT,    -- exact platform thread/topic id; NULL = all
+                                  -- threads for this wiring (migration 023)
   created_at             TEXT NOT NULL,
   UNIQUE(messaging_group_id, agent_group_id)
 );

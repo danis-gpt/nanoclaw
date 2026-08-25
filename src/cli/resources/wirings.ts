@@ -45,6 +45,16 @@ function normalizeThreads(v: unknown): number {
   throw new Error(`--threads must be true or false, got "${v}"`);
 }
 
+function normalizeThreadFilter(value: unknown): string | null {
+  if (value === null) return null;
+  const filter = String(value).trim();
+  if (filter === 'null') return null;
+  if (!filter || filter.startsWith('system:')) {
+    throw new Error('--thread-filter must be a non-empty platform thread id and cannot use the system: namespace');
+  }
+  return filter;
+}
+
 registerResource({
   name: 'wiring',
   plural: 'wirings',
@@ -118,6 +128,13 @@ registerResource({
       updatable: true,
     },
     {
+      name: 'thread_filter',
+      type: 'string',
+      description:
+        'Exact platform thread/topic id for this wiring. NULL routes all threads; pass --thread-filter null to clear it. Telegram forum topics use the full adapter id, e.g. telegram:<chat_id>:<topic_id>.',
+      updatable: true,
+    },
+    {
       name: 'priority',
       type: 'number',
       description: 'Fanout order when multiple agents are wired to the same messaging group — higher priority first.',
@@ -137,6 +154,7 @@ registerResource({
   preUpdate: (updates, current) => {
     const mg = requireMessagingGroup(current.messaging_group_id);
     if (updates.threads !== undefined) updates.threads = normalizeThreads(updates.threads);
+    if (updates.thread_filter !== undefined) updates.thread_filter = normalizeThreadFilter(updates.thread_filter);
 
     const merged: EngageValues = { ...current, ...updates };
     // Legacy rows can be engage_mode='pattern' with a NULL pattern (the
@@ -160,7 +178,7 @@ registerResource({
     create: {
       access: 'approval',
       description:
-        'Wire a messaging group to an agent group. Identify the messaging group by --messaging-group-id OR --channel-type + --platform-id (+ --instance); identify the agent by --agent-group-id OR --agent-group <folder>. Idempotent on (messaging group, agent group). Engagement flags: --engage-mode, --engage-pattern, --session-mode, --sender-scope, --ignored-message-policy, --threads, --priority. Omitted engage flags default from the channel adapter declaration.',
+        'Wire a messaging group to an agent group. Identify the messaging group by --messaging-group-id OR --channel-type + --platform-id (+ --instance); identify the agent by --agent-group-id OR --agent-group <folder>. Idempotent on (messaging group, agent group). Engagement flags: --engage-mode, --engage-pattern, --session-mode, --sender-scope, --ignored-message-policy, --threads, --thread-filter, --priority. Omitted engage flags default from the channel adapter declaration.',
       handler: async (args) => {
         // Resolve the messaging group.
         let mgId = args.messaging_group_id as string | undefined;
@@ -185,10 +203,21 @@ registerResource({
           agId = ag.id;
         }
 
-        // Idempotent: a wiring for this pair already exists → return it
-        // (defaults/validation/side-effects are skipped — nothing new is written).
+        // Idempotent: a wiring for this pair already exists → return it unless
+        // the caller explicitly requested a different exact-thread boundary.
+        // Silently keeping NULL here would broaden routing to every thread.
         const existing = getMessagingGroupAgentByPair(mgId, agId);
-        if (existing) return existing;
+        if (existing) {
+          if (args.thread_filter !== undefined) {
+            const requestedThreadFilter = normalizeThreadFilter(args.thread_filter);
+            if (requestedThreadFilter !== (existing.thread_filter ?? null)) {
+              throw new Error(
+                `wiring already exists: ${existing.id}; use wirings update ${existing.id} --thread-filter ...`,
+              );
+            }
+          }
+          return existing;
+        }
 
         // Pass-1 parity: only defined keys enter `values` (an unset
         // engage_pattern stays absent → column NULL), enums validated.
@@ -208,6 +237,7 @@ registerResource({
         }
         if (args.engage_pattern !== undefined) values.engage_pattern = args.engage_pattern;
         if (args.threads !== undefined) values.threads = args.threads;
+        if (args.thread_filter !== undefined) values.thread_filter = normalizeThreadFilter(args.thread_filter);
         if (args.priority !== undefined) values.priority = Number(args.priority);
 
         // Pass-2 parity: context-aware defaults + cross-column validation.
@@ -247,9 +277,9 @@ registerResource({
         if (values.priority === undefined) values.priority = 0;
 
         // postCreate parity, in one transaction with the INSERT (a throw rolls
-        // back the parent row). Dynamic INSERT — not createMessagingGroupAgent,
-        // which doesn't insert `threads`, so an explicit --threads would be
-        // lost. Create the companion `agent_destinations` row so the agent has
+        // back the parent row). Dynamic INSERT keeps the custom create path's
+        // declaration-derived values together. Create the companion
+        // `agent_destinations` row so the agent has
         // a local name it can address this chat by. Without this, the agent
         // generates a response, but delivery's ACL drops the outbound message
         // (no destination matches the target) and the reply is silently lost.
