@@ -1,4 +1,5 @@
 import { spawn as nodeSpawn } from 'child_process';
+import crypto from 'crypto';
 import fs from 'fs';
 import http from 'http';
 import os from 'os';
@@ -8,7 +9,15 @@ import readline from 'readline';
 import { memoryContextForSessionStart, type MemorySessionHookRegistration } from '../memory/session-hook.js';
 import { codexAppFeatureArgs } from './codex-app-policy.js';
 import { registerProvider } from './provider-registry.js';
-import type { AgentProvider, AgentQuery, ProviderEvent, ProviderFile, ProviderOptions, QueryInput } from './types.js';
+import type {
+  AgentProvider,
+  AgentQuery,
+  McpServerConfig,
+  ProviderEvent,
+  ProviderFile,
+  ProviderOptions,
+  QueryInput,
+} from './types.js';
 
 function log(msg: string): void {
   console.error(`[codex-provider] ${msg}`);
@@ -74,6 +83,7 @@ export interface NativeCodexRequest {
   continuation?: string;
   cwd: string;
   modelHint?: 'default' | 'escalation';
+  mcpServers?: Record<string, McpServerConfig>;
 }
 
 export interface CodexChild {
@@ -111,6 +121,7 @@ export class CodexProvider implements AgentProvider {
   private mode: 'broker' | 'native';
   private brokerSocket: string;
   private brokerToken: string;
+  private mcpServers: Record<string, McpServerConfig>;
   private memorySessionHook?: MemorySessionHookRegistration;
 
   constructor(options: ProviderOptions = {}) {
@@ -120,6 +131,7 @@ export class CodexProvider implements AgentProvider {
     this.brokerSocket =
       options.env?.CODEX_BROKER_SOCKET || process.env.CODEX_BROKER_SOCKET || '/run/nanoclaw-codex-broker.sock';
     this.brokerToken = options.env?.CODEX_BROKER_TOKEN || process.env.CODEX_BROKER_TOKEN || '';
+    this.mcpServers = options.mcpServers ?? {};
   }
 
   registerMemorySessionHook(hook: MemorySessionHookRegistration): void {
@@ -151,7 +163,13 @@ export class CodexProvider implements AgentProvider {
         yield { type: 'activity' };
         const result =
           provider.mode === 'native'
-            ? await runNativeCodex({ prompt, continuation, cwd: input.cwd, modelHint })
+            ? await runNativeCodex({
+                prompt,
+                continuation,
+                cwd: input.cwd,
+                modelHint,
+                mcpServers: provider.mcpServers,
+              })
             : await queryBroker(provider.brokerSocket, {
                 token: provider.brokerToken,
                 prompt,
@@ -306,6 +324,7 @@ function buildNativeCodexArgs(req: NativeCodexRequest, outFile: string, model: s
   const common = [
     '--json',
     '--skip-git-repo-check',
+    '--ignore-user-config',
     '--dangerously-bypass-approvals-and-sandbox',
     ...codexAppFeatureArgs(req.cwd, fs.existsSync),
     '-m',
@@ -318,6 +337,117 @@ function buildNativeCodexArgs(req: NativeCodexRequest, outFile: string, model: s
     return ['exec', 'resume', ...common, req.continuation, '-'];
   }
   return ['exec', ...common, '-C', req.cwd, '-'];
+}
+
+function tomlString(value: string): string {
+  return JSON.stringify(value);
+}
+
+function mcpEnvName(serverName: string, serverIndex: number, purpose: string, index: number): string {
+  const safeServer = serverName.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+  const nonce = crypto.randomBytes(8).toString('hex').toUpperCase();
+  return `NANOCLAW_MCP_${nonce}_${serverIndex}_${safeServer}_${purpose}_${index}`;
+}
+
+function inlineTomlStringMap(entries: Array<[string, string]>): string {
+  return `{ ${entries.map(([key, value]) => `${tomlString(key)} = ${tomlString(value)}`).join(', ')} }`;
+}
+
+function isTrustedBuiltinStdio(serverName: string, server: McpServerConfig): boolean {
+  return (
+    serverName === 'nanoclaw' &&
+    server.type !== 'http' &&
+    server.command === 'bun' &&
+    server.args?.length === 2 &&
+    server.args?.[0] === 'run' &&
+    server.args?.[1] === '/app/src/mcp-tools/index.ts' &&
+    server.cwd === undefined &&
+    Object.keys(server.env ?? {}).length === 0
+  );
+}
+
+/**
+ * Materialize per-group MCP config as one-shot Codex CLI overrides. Secret
+ * HTTP values stay in the child environment; argv contains only environment
+ * variable names. Custom stdio env and args are rejected because Codex has no
+ * per-server secret boundary for them. This prevents a group's connector
+ * credentials from being persisted into the shared native Codex home or
+ * exposed to another MCP process.
+ */
+export function buildNativeCodexLaunch(
+  req: NativeCodexRequest,
+  outFile: string,
+  model: string,
+  baseEnv: NodeJS.ProcessEnv = process.env,
+): { args: string[]; env: NodeJS.ProcessEnv } {
+  const args = buildNativeCodexArgs(req, outFile, model);
+  const env: NodeJS.ProcessEnv = { ...baseEnv };
+  const overrides: string[] = [];
+  const servers = Object.entries(req.mcpServers ?? {});
+
+  const hasCredentialedHttp = servers.some(
+    ([, server]) => server.type === 'http' && Object.keys(server.headers ?? {}).length > 0,
+  );
+  if (
+    hasCredentialedHttp &&
+    servers.some(([serverName, server]) => server.type !== 'http' && !isTrustedBuiltinStdio(serverName, server))
+  ) {
+    throw new Error('Native Codex cannot mix credentialed HTTP MCP with untrusted stdio MCP servers');
+  }
+
+  const addOverride = (key: string, value: string): void => {
+    overrides.push('-c', `${key}=${value}`);
+  };
+
+  let serverIndex = 0;
+  for (const [serverName, server] of servers) {
+    const currentServerIndex = serverIndex++;
+    const prefix = `mcp_servers.${serverName}`;
+    if (server.type === 'http') {
+      addOverride(`${prefix}.url`, tomlString(server.url));
+      const envHeaders: Array<[string, string]> = [];
+      let headerIndex = 0;
+      for (const [header, value] of Object.entries(server.headers ?? {})) {
+        const bearer = header.toLowerCase() === 'authorization' && /^Bearer\s+\S/i.test(value);
+        if (bearer) {
+          const variable = mcpEnvName(serverName, currentServerIndex, 'BEARER', headerIndex++);
+          env[variable] = value.replace(/^Bearer\s+/i, '');
+          addOverride(`${prefix}.bearer_token_env_var`, tomlString(variable));
+          continue;
+        }
+        const variable = mcpEnvName(serverName, currentServerIndex, 'HEADER', headerIndex++);
+        env[variable] = value;
+        envHeaders.push([header, variable]);
+      }
+      if (envHeaders.length > 0) {
+        addOverride(`${prefix}.env_http_headers`, inlineTomlStringMap(envHeaders));
+      }
+      continue;
+    }
+
+    addOverride(`${prefix}.command`, tomlString(server.command));
+    if ((server.args?.length ?? 0) > 0 && !isTrustedBuiltinStdio(serverName, server)) {
+      throw new Error(
+        `Native Codex MCP server ${serverName} declares custom stdio arguments; use an argument-free wrapper or scoped HTTP connector`,
+      );
+    }
+    if (server.args && server.args.length > 0) addOverride(`${prefix}.args`, JSON.stringify(server.args));
+    if (server.cwd) addOverride(`${prefix}.cwd`, tomlString(server.cwd));
+
+    const envKeys = Object.keys(server.env ?? {});
+    if (envKeys.length > 0) {
+      throw new Error(
+        `Native Codex MCP server ${serverName} declares stdio environment values; use a scoped HTTP connector`,
+      );
+    }
+  }
+
+  // Global exec flags are accepted after `exec`/`exec resume`; place MCP
+  // overrides immediately before the prompt/model flags for deterministic
+  // inspection and to keep resume behavior identical.
+  const insertAt = req.continuation ? 2 : 1;
+  args.splice(insertAt, 0, ...overrides);
+  return { args, env };
 }
 
 function tail(text: string, max = 4000): string {
@@ -368,7 +498,7 @@ async function runNativeCodexAttempt(
   const collectFiles = deps.collectReferencedGeneratedFiles ?? collectReferencedGeneratedFiles;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-codex-native-'));
   const outFile = path.join(tmpDir, 'last-message.txt');
-  const args = buildNativeCodexArgs(req, outFile, modelDecision.model);
+  const launch = buildNativeCodexLaunch(req, outFile, modelDecision.model);
   let stderr = '';
   let lastAgentText: string | null = null;
   let threadId: string | undefined;
@@ -377,9 +507,9 @@ async function runNativeCodexAttempt(
     log(
       `native query started model=${modelDecision.model} reason=${modelDecision.reason} resume=${Boolean(req.continuation)}`,
     );
-    const child = spawn('codex', args, {
+    const child = spawn('codex', launch.args, {
       cwd: req.cwd,
-      env: process.env,
+      env: launch.env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const exitPromise = new Promise<{ code: number | null } | { err: Error }>((resolve) => {

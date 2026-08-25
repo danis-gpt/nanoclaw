@@ -7,7 +7,13 @@ import { Readable, Writable } from 'stream';
 import { afterEach, describe, expect, it } from 'bun:test';
 
 import { MEMORY_SESSION_HOOK } from '../memory/session-hook.js';
-import { buildPrompt, CodexProvider, runNativeCodex, type SpawnCodex } from './codex.js';
+import {
+  buildNativeCodexLaunch,
+  buildPrompt,
+  CodexProvider,
+  runNativeCodex,
+  type SpawnCodex,
+} from './codex.js';
 
 interface FakeRun {
   code: number;
@@ -54,6 +60,139 @@ function fakeSpawn(runs: FakeRun[]): {
 }
 
 describe('runNativeCodex', () => {
+  it('passes per-group MCP config without putting header or stdio env secrets in argv', () => {
+    const launch = buildNativeCodexLaunch(
+      {
+        prompt: 'hello',
+        cwd: '/workspace/agent',
+        mcpServers: {
+          docs: {
+            type: 'http',
+            url: 'http://127.0.0.1:18080/mcp',
+            headers: { Authorization: 'Bearer docs-secret', 'X-Workspace': 'artha-internal' },
+          },
+          nanoclaw: {
+            command: 'bun',
+            args: ['run', '/app/src/mcp-tools/index.ts'],
+          },
+        },
+      },
+      '/tmp/last-message.txt',
+      'gpt-5.3-codex',
+      { PATH: '/usr/bin' },
+    );
+
+    expect(launch.args.join(' ')).toContain('mcp_servers.docs.url=');
+    expect(launch.args.join(' ')).toContain('mcp_servers.docs.bearer_token_env_var=');
+    expect(launch.args.join(' ')).toContain('mcp_servers.docs.env_http_headers=');
+    expect(launch.args).toContain('--ignore-user-config');
+    expect(launch.args.join(' ')).not.toContain('docs-secret');
+    expect(launch.args.join(' ')).not.toContain('artha-internal');
+    expect(Object.values(launch.env)).toContain('docs-secret');
+    expect(Object.values(launch.env)).toContain('artha-internal');
+  });
+
+  it('rejects stdio environment values instead of sharing them with other MCP processes', () => {
+    expect(() =>
+      buildNativeCodexLaunch(
+        {
+          prompt: 'hello',
+          cwd: '/workspace/agent',
+          mcpServers: {
+            local: { command: '/local', env: { API_TOKEN: 'local-secret' } },
+          },
+        },
+        '/tmp/last-message.txt',
+        'gpt-5.3-codex',
+        {},
+      ),
+    ).toThrow('declares stdio environment values');
+  });
+
+  it('rejects credentialed HTTP mixed with an untrusted stdio MCP server', () => {
+    expect(() =>
+      buildNativeCodexLaunch(
+        {
+          prompt: 'hello',
+          cwd: '/workspace/agent',
+          mcpServers: {
+            docs: {
+              type: 'http',
+              url: 'http://127.0.0.1:18080/mcp',
+              headers: { Authorization: 'Bearer docs-secret' },
+            },
+            local: { command: '/local' },
+          },
+        },
+        '/tmp/last-message.txt',
+        'gpt-5.3-codex',
+        {},
+      ),
+    ).toThrow('cannot mix credentialed HTTP MCP with untrusted stdio MCP servers');
+  });
+
+  it('rejects all custom stdio arguments before a credential can reach argv', () => {
+    expect(() =>
+      buildNativeCodexLaunch(
+        {
+          prompt: 'hello',
+          cwd: '/workspace/agent',
+          mcpServers: { local: { command: '/local', args: ['--api-token', 'opaque-secret'] } },
+        },
+        '/tmp/last-message.txt',
+        'gpt-5.3-codex',
+        {},
+      ),
+    ).toThrow('declares custom stdio arguments');
+  });
+
+  it('rejects a spoofed nanoclaw stdio server beside credentialed HTTP', () => {
+    expect(() =>
+      buildNativeCodexLaunch(
+        {
+          prompt: 'hello',
+          cwd: '/workspace/agent',
+          mcpServers: {
+            docs: {
+              type: 'http',
+              url: 'http://127.0.0.1:18080/mcp',
+              headers: { Authorization: 'Bearer docs-secret' },
+            },
+            nanoclaw: {
+              command: 'bun',
+              args: ['run', '/workspace/agent/evil/mcp-tools/index.ts'],
+              cwd: '/workspace/agent/evil',
+            },
+          },
+        },
+        '/tmp/last-message.txt',
+        'gpt-5.3-codex',
+        {},
+      ),
+    ).toThrow('cannot mix credentialed HTTP MCP with untrusted stdio MCP servers');
+  });
+
+  it('keeps HTTP header env names distinct when server names normalize alike', () => {
+    const launch = buildNativeCodexLaunch(
+      {
+        prompt: 'hello',
+        cwd: '/workspace/agent',
+        mcpServers: {
+          'a-b': { type: 'http', url: 'http://127.0.0.1:18080/mcp', headers: { Authorization: 'Bearer first' } },
+          a_b: { type: 'http', url: 'http://127.0.0.1:18081/mcp', headers: { Authorization: 'Bearer second' } },
+        },
+      },
+      '/tmp/last-message.txt',
+      'gpt-5.3-codex',
+      {},
+    );
+
+    const bearerVariables = launch.args
+      .filter((arg) => arg.includes('.bearer_token_env_var='))
+      .map((arg) => arg.split('=', 2)[1]);
+    expect(new Set(bearerVariables).size).toBe(2);
+  });
+
   it('starts codex exec inside the agent container cwd', async () => {
     process.env.CODEX_DEFAULT_MODEL = 'gpt-5.3-codex';
     const { spawn, calls } = fakeSpawn([

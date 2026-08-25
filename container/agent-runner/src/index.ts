@@ -95,6 +95,9 @@ async function main(): Promise<void> {
   };
 
   for (const [name, serverConfig] of Object.entries(config.mcpServers)) {
+    if (name === 'nanoclaw') {
+      throw new Error('MCP server name "nanoclaw" is reserved for the built-in server');
+    }
     // Plugin-shipped servers get ${PLUGIN_ROOT}/${PLUGIN_DATA} expansion and
     // the two injected env vars; everything else passes through untouched.
     mcpServers[name] = resolvePluginServer(serverConfig);
