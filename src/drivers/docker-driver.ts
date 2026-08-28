@@ -332,8 +332,9 @@ export class DockerSessionDriver implements SessionDriver {
         'status=exited',
         '--filter',
         'status=created',
-        '--filter',
-        'status=dead',
+        // Podman rejects Docker's `dead` state as an invalid filter value.
+        // Its failed containers are reported as exited, so no residue is lost.
+        ...(CONTAINER_RUNTIME_BIN === 'podman' ? [] : ['--filter', 'status=dead']),
         '--format',
         '{{.Names}}',
       ]);

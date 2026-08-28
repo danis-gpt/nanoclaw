@@ -481,6 +481,15 @@ describe('idempotency and adoption', () => {
     ]);
   });
 
+  it('does not request Docker-only dead state from Podman during residue cleanup', async () => {
+    await driver().reapResidue('spike');
+
+    const staleList = cli.joined().find((command) => command.startsWith('ps -a '));
+    expect(staleList).toContain('status=exited');
+    expect(staleList).toContain('status=created');
+    expect(staleList).not.toContain('status=dead');
+  });
+
   it('stops pre-seam containers, which carry the install label but no session label', async () => {
     // Containers spawned before the seam cannot be adopted (no session label to
     // rebuild a handle from) and cannot be matched to a session — left running
