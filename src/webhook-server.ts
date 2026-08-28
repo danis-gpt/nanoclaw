@@ -111,58 +111,58 @@ function ensureServer(): void {
   if (server) return;
 
   const port = parseInt(process.env.WEBHOOK_PORT || String(DEFAULT_PORT), 10);
-  const host = process.env.WEBHOOK_HOST || '127.0.0.1';
 
-  server = http.createServer(async (req, res) => {
-    const url = req.url || '/';
+  server = http.createServer((req, res) => {
+    void (async () => {
+      const url = req.url || '/';
 
-    // Route: /webhook/{adapterName}
-    const match = url.match(/^\/webhook\/([^/?]+)/);
-    if (!match) {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      res.end('Not found');
-      return;
-    }
-
-    const adapterName = match[1];
-
-    try {
-      // Raw routes take priority — the handler writes the response itself.
-      const rawHandler = rawRoutes.get(adapterName);
-      if (rawHandler) {
-        await rawHandler(req, res);
-        return;
-      }
-
-      const entry = routes.get(adapterName);
-      if (!entry) {
+      // Route: /webhook/{adapterName}
+      const match = url.match(/^\/webhook\/([^/?]+)/);
+      if (!match) {
         res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end(`Unknown adapter: ${adapterName}`);
+        res.end('Not found');
         return;
       }
 
-      const webReq = await toWebRequest(req);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const webhooks = entry.chat.webhooks as Record<string, (r: Request, opts?: any) => Promise<Response>>;
-      const handler = webhooks[entry.adapterName];
-      const webRes = await handler(webReq, {
-        waitUntil: (p: Promise<unknown>) => {
-          p.catch(() => {});
-        },
-      });
-      await fromWebResponse(webRes, res);
-      // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
-    } catch (err) {
-      log.error('Webhook handler error', { adapter: adapterName, url: req.url, err });
-      if (!res.headersSent) {
-        res.writeHead(500, { 'Content-Type': 'text/plain' });
-        res.end('Internal Server Error');
+      const adapterName = match[1];
+
+      try {
+        // Raw routes take priority — the handler writes the response itself.
+        const rawHandler = rawRoutes.get(adapterName);
+        if (rawHandler) {
+          await rawHandler(req, res);
+          return;
+        }
+
+        const entry = routes.get(adapterName);
+        if (!entry) {
+          res.writeHead(404, { 'Content-Type': 'text/plain' });
+          res.end(`Unknown adapter: ${adapterName}`);
+          return;
+        }
+
+        const webReq = await toWebRequest(req);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const webhooks = entry.chat.webhooks as Record<string, (r: Request, opts?: any) => Promise<Response>>;
+        const handler = webhooks[entry.adapterName];
+        const webRes = await handler(webReq, {
+          waitUntil: (p: Promise<unknown>) => {
+            void p.catch(() => {});
+          },
+        });
+        await fromWebResponse(webRes, res);
+      } catch (err) {
+        log.error('Webhook handler error', { adapter: adapterName, url: req.url, err });
+        if (!res.headersSent) {
+          res.writeHead(500, { 'Content-Type': 'text/plain' });
+          res.end('Internal Server Error');
+        }
       }
-    }
+    })();
   });
 
-  server.listen(port, host, () => {
-    log.info('Webhook server started', { port, host, adapters: [...routes.keys()] });
+  server.listen(port, '0.0.0.0', () => {
+    log.info('Webhook server started', { port, adapters: [...routes.keys()] });
   });
 }
 

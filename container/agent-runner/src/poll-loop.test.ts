@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 
-import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from './db/connection.js';
+import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from './mailbox/sqlite/connection.js';
 import { getPendingMessages, markCompleted } from './db/messages-in.js';
 import { getUndeliveredMessages } from './db/messages-out.js';
 import { formatMessages, extractRouting } from './formatter.js';
-import { isCorruptionError, processQuery } from './poll-loop.js';
+import { processQuery } from './poll-loop.js';
 import { MockProvider } from './providers/mock.js';
 import type { AgentQuery, ProviderEvent } from './providers/types.js';
 
@@ -220,13 +220,7 @@ describe('origin metadata (from= attribute)', () => {
       .run(name, name, channelType, platformId);
   }
 
-  function insertWithRouting(
-    id: string,
-    kind: string,
-    content: object,
-    channelType: string | null,
-    platformId: string | null,
-  ): void {
+  function insertWithRouting(id: string, kind: string, content: object, channelType: string | null, platformId: string | null): void {
     getInboundDb()
       .prepare(
         `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, content)
@@ -302,10 +296,13 @@ describe('mock provider', () => {
     }
 
     const typed = events.filter((e) => e.type !== 'activity');
-    expect(typed.length).toBeGreaterThanOrEqual(2);
+    expect(typed.length).toBeGreaterThanOrEqual(3);
     expect(typed[0].type).toBe('init');
-    expect(typed[1].type).toBe('result');
-    expect((typed[1] as { text: string }).text).toBe('Echo: Hello');
+    // The mock declares emitsMidTurnText, so the turn's text streams as a
+    // text event before the result repeats it.
+    expect(typed[1].type).toBe('text');
+    expect(typed[2].type).toBe('result');
+    expect((typed[2] as { text: string }).text).toBe('Echo: Hello');
   });
 
   it('should handle push() during active query', async () => {
@@ -360,7 +357,7 @@ describe('end-to-end with mock provider', () => {
 
     for await (const event of query.events) {
       if (event.type === 'result' && event.text) {
-        writeMessageOut({
+        await writeMessageOut({
           id: `out-${Date.now()}`,
           in_reply_to: routing.inReplyTo,
           kind: 'chat',
@@ -470,42 +467,6 @@ describe('error result with no <message> envelope', () => {
     expect(pushes).toHaveLength(1);
     expect(pushes[0]).toContain('was not delivered');
   });
-
-  it('ends a completed idle-enabled query but keeps an unwrapped retry open', async () => {
-    let completedEnds = 0;
-    const completed = makeResultQuery({ type: 'result', text: 'billing unavailable', isError: true });
-    completed.query.end = () => {
-      completedEnds++;
-    };
-    await processQuery(completed.query, ERR_ROUTING, ['m1'], 'claude', undefined, 'prompt', undefined, 1_000);
-    expect(completedEnds).toBe(1);
-
-    let retryEnds = 0;
-    const retry = makeResultQuery({ type: 'result', text: 'bare retry text' });
-    retry.query.end = () => {
-      retryEnds++;
-    };
-    await processQuery(retry.query, ERR_ROUTING, ['m1'], 'claude', undefined, 'prompt', undefined, 1_000);
-    expect(retry.pushes).toHaveLength(1);
-    expect(retryEnds).toBe(0);
-  });
-});
-
-describe('isCorruptionError', () => {
-  it('matches the Docker Desktop macOS torn-read symptom', () => {
-    expect(isCorruptionError('database disk image is malformed')).toBe(true);
-  });
-
-  it('matches wrapped SQLite corruption codes', () => {
-    expect(isCorruptionError('SqliteError: SQLITE_CORRUPT_VTAB: ...')).toBe(true);
-    expect(isCorruptionError('file is not a database')).toBe(true);
-  });
-
-  it('returns false for unrelated errors', () => {
-    expect(isCorruptionError('database is locked')).toBe(false);
-    expect(isCorruptionError('no such table: messages_in')).toBe(false);
-    expect(isCorruptionError('')).toBe(false);
-  });
 });
 
 // --- Task-run turn wiring: the REAL processQuery path (one-door) ---
@@ -523,9 +484,9 @@ const TASK_ROUTING = {
 
 function taskLogRows(): Array<{ text: string }> {
   return (
-    getOutboundDb().prepare("SELECT content FROM messages_out WHERE kind = 'task_log' ORDER BY seq").all() as Array<{
-      content: string;
-    }>
+    getOutboundDb()
+      .prepare("SELECT content FROM messages_out WHERE kind = 'task_log' ORDER BY seq")
+      .all() as Array<{ content: string }>
   ).map((r) => JSON.parse(r.content) as { text: string });
 }
 
@@ -548,10 +509,6 @@ describe('task-run turn wiring (real processQuery)', () => {
 
   it('logs and conditionally nudges a second task run in the same open query', async () => {
     const pushes: string[] = [];
-    let resolveFollowUp!: () => void;
-    const followUpPushed = new Promise<void>((resolve) => {
-      resolveFollowUp = resolve;
-    });
 
     async function* events(): AsyncGenerator<ProviderEvent> {
       yield { type: 'init', continuation: 's1' };
@@ -562,7 +519,21 @@ describe('task-run turn wiring (real processQuery)', () => {
       // A SECOND task run lands while the query is open — the follow-up poller
       // pushes it and must reset the per-turn correction state.
       insertMessage('t2', 'task', { prompt: 'fire two' });
-      await followUpPushed;
+      // The poller ticks every ACTIVE_POLL_INTERVAL_MS (500ms), so this
+      // normally resolves in well under a second. The generous deadline is
+      // for slow shared CI runners — and it must stay well below the test's
+      // own timeout (set below), so exhaustion fails on the diagnostic throw
+      // rather than a mute test timeout.
+      const deadline = Date.now() + 15_000;
+      while (!pushes.some((p) => p.includes('fire two')) && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      if (!pushes.some((p) => p.includes('fire two'))) {
+        throw new Error(
+          `follow-up poller never pushed the second task run within 15s; ` +
+            `pushes seen (${pushes.length}): ${JSON.stringify(pushes.map((p) => p.slice(0, 80)))}`,
+        );
+      }
 
       // Turn 2 repeats the mistake. This receives a second independent nudge
       // only if the follow-up path reset taskBlockNudged.
@@ -573,16 +544,13 @@ describe('task-run turn wiring (real processQuery)', () => {
     const query: AgentQuery = {
       push: (m: string) => {
         pushes.push(m);
-        if (m.includes('<task') && m.includes('fire two')) resolveFollowUp();
       },
       end: () => {},
       events: events(),
       abort: () => {},
     };
 
-    // Use the poll interval seam so this real-timer integration test is not
-    // sensitive to unrelated suite load. Production retains the 500ms default.
-    await processQuery(query, TASK_ROUTING, ['t1'], 'claude', undefined, 'prompt', undefined, 0, 10);
+    await processQuery(query, TASK_ROUTING, ['t1'], 'claude', undefined, 'prompt', undefined);
 
     const nudges = pushes.filter((p) => p.includes('If and only if'));
     expect(nudges).toHaveLength(2);
@@ -595,5 +563,8 @@ describe('task-run turn wiring (real processQuery)', () => {
     expect(logs[1]).toContain('[undelivered → local-cli] fire two result');
     expect(logs).not.toContain('first delivery decision handled');
     expect(logs).not.toContain('second delivery decision handled');
-  }, 10_000);
+    // Explicit budget: the default 5s equalled the old inner deadline, so on
+    // slow runners the test died as a mute timeout instead of reaching the
+    // diagnostic throw above (observed consistently on CI-hosted runners).
+  }, 20_000);
 });

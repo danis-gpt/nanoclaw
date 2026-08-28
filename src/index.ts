@@ -4,16 +4,14 @@
  * Thin orchestrator: init DB, run migrations, start channel adapters,
  * start delivery polls, start sweep, handle shutdown.
  */
-import path from 'path';
-
 import { backfillContainerConfigs } from './backfill-container-configs.js';
-import { DATA_DIR, CREDENTIAL_PROXY_PORT } from './config.js';
+import { CENTRAL_DB_PATH, CREDENTIAL_PROXY_PORT } from './config.js';
 import { enforceStartupBackoff, resetCircuitBreaker } from './circuit-breaker.js';
-import { startCredentialProxy, detectAuthMode } from './credential-proxy.js';
-import { initDb } from './db/connection.js';
+import { adoptRunningSessions } from './container-runner.js';
+import { detectAuthMode, startCredentialProxy } from './credential-proxy.js';
+import { closeDb, initDb } from './db/connection.js';
 import { runMigrations } from './db/migrations/index.js';
-import { markRunningSessionsStopped } from './db/sessions.js';
-import { ensureContainerRuntimeRunning, cleanupOrphans } from './container-runtime.js';
+import { getSessionDriver } from './drivers/index.js';
 import { startActiveDeliveryPoll, startSweepDeliveryPoll, setDeliveryAdapter, stopDeliveryPolls } from './delivery.js';
 import { startHostSweep, stopHostSweep } from './host-sweep.js';
 import { startHostModules, stopHostModules } from './host-lifecycle.js';
@@ -34,7 +32,6 @@ async function dispatchResponse(payload: ResponsePayload): Promise<void> {
     try {
       const claimed = await handler(payload);
       if (claimed) return;
-      // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
     } catch (err) {
       log.error('Response handler threw', { questionId: payload.questionId, err });
     }
@@ -46,8 +43,8 @@ async function dispatchResponse(payload: ResponsePayload): Promise<void> {
 // Channel skills uncomment lines in channels/index.ts to enable them.
 import './channels/index.js';
 
-// Modules barrel — default modules (typing, mount-security) ship here; skills
-// append registry-based modules. Imported for side effects (registrations).
+// Modules barrel — imports registration modules, including the singular
+// mailbox composition slot. Imported for side effects.
 import './modules/index.js';
 
 // CLI command barrel — populates the `ncl` registry before the CLI server
@@ -74,26 +71,26 @@ async function main(): Promise<void> {
   enforceUpgradeTripwire();
 
   // 1. Init central DB
-  const dbPath = path.join(DATA_DIR, 'v2.db');
-  const db = initDb(dbPath);
-  runMigrations(db);
-  log.info('Central DB ready', { path: dbPath });
+  const db = await initDb(CENTRAL_DB_PATH, { role: 'host' });
+  await runMigrations(db, undefined, { mode: 'auto' });
+  log.info('Central DB ready', { dialect: db.dialect });
 
   // 1b. Backfill container_configs from legacy container.json files.
   // Idempotent — skips groups that already have a config row.
-  backfillContainerConfigs();
+  if (db.dialect === 'sqlite') await backfillContainerConfigs();
+  else log.info('Skipping local container.json backfill for non-local central DB');
 
-  // 2. Credential proxy (injects real API keys into container requests)
+  // 2. Keep the Artha legacy Claude credential boundary available. Native
+  // Codex sessions do not use it, but existing Claude-backed roles still do.
   const proxyAuthMode = detectAuthMode();
   await startCredentialProxy(CREDENTIAL_PROXY_PORT);
   log.info('Credential proxy started', { port: CREDENTIAL_PROXY_PORT, authMode: proxyAuthMode });
 
-  // 3. Container runtime
-  ensureContainerRuntimeRunning();
-  if (cleanupOrphans()) {
-    const reconciled = markRunningSessionsStopped();
-    if (reconciled > 0) log.info('Reconciled stale container session state', { count: reconciled });
-  }
+  // 3. Session runtime: prove it is reachable, then reconcile what survived a
+  // restart. Adoption replaces the old reap-everything cleanup — a session that
+  // is still running keeps running, and only true orphans are stopped.
+  await getSessionDriver().ensureReady?.();
+  await adoptRunningSessions();
 
   // 3. Channel adapters
   await initChannelAdapters((adapter: ChannelAdapter): ChannelSetup => {
@@ -189,6 +186,7 @@ async function shutdown(signal: string): Promise<void> {
   try {
     await teardownChannelAdapters();
   } finally {
+    await closeDb();
     // Always reset on graceful shutdown — even if teardown threw, we got here
     // via SIGTERM/SIGINT, not a crash, so the next start shouldn't be counted
     // as one.
@@ -197,8 +195,8 @@ async function shutdown(signal: string): Promise<void> {
   }
 }
 
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+process.on('SIGINT', () => void shutdown('SIGINT'));
 
 main().catch((err) => {
   log.fatal('Startup failed', { err });

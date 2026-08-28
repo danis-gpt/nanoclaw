@@ -34,10 +34,10 @@ const baseContext = {
 };
 
 describe('buildCodexProviderContribution', () => {
-  it('native mode mounts isolated agent Codex home and does not require broker socket or grant', () => {
+  it('native mode mounts isolated agent Codex home and does not require broker socket or grant', async () => {
     const writeGrant = vi.fn();
     const prepareAgentCodexHome = vi.fn();
-    const contribution = buildCodexProviderContribution(baseContext, {
+    const contribution = await buildCodexProviderContribution(baseContext, {
       ...baseDeps,
       mode: 'native',
       socketExists: () => false,
@@ -65,9 +65,9 @@ describe('buildCodexProviderContribution', () => {
     expect(contribution.env).not.toHaveProperty('CODEX_BROKER_SOCKET');
   });
 
-  it('broker mode keeps socket mount and writes a scoped grant', () => {
+  it('broker mode keeps socket mount and writes a scoped grant', async () => {
     const writeGrant = vi.fn();
-    const contribution = buildCodexProviderContribution(baseContext, {
+    const contribution = await buildCodexProviderContribution(baseContext, {
       ...baseDeps,
       mode: 'broker',
       writeGrant,

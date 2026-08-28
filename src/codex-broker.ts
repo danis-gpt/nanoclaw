@@ -49,6 +49,7 @@ function writeJson(res: http.ServerResponse, status: number, body: unknown): voi
   res.end(JSON.stringify(body));
 }
 
+// eslint-disable-next-line @typescript-eslint/no-misused-promises -- the handler catches and serializes all request failures
 const server = http.createServer(async (req, res) => {
   if (req.method !== 'POST' || req.url !== '/v1/query') {
     writeJson(res, 404, { error: 'not found' });

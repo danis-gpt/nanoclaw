@@ -1,5 +1,10 @@
 # NanoClaw — Central DB Schema
 
+The central store is accessed through the asynchronous `DbDriver` contract in
+`src/db/driver.ts`. `src/db/compose.ts` performs the one backend choice and
+registers it through `src/db/driver-registry.ts`; callers never import a backend
+directly. SQLite at `data/v2.db` remains the default composition.
+
 Complete reference for `data/v2.db`, the host-owned admin-plane database. Start with [db.md](db.md) for the three-DB overview, the map, and the cross-mount rules.
 
 Access layer: `src/db/`. `src/db/schema.ts`'s `SCHEMA` constant is a *reference copy* of the core tables for orientation — it is not exhaustive: several tables (`agent_destinations`, `pending_approvals`, `container_configs`, `agent_message_policies`, `pending_channel_approvals`, and others) exist only in their migration files under `src/db/migrations/`, which remain the actual source of truth for what's created at runtime.
@@ -66,19 +71,13 @@ CREATE TABLE messaging_group_agents (
   ignored_message_policy TEXT NOT NULL DEFAULT 'drop',   -- 'drop' | 'accumulate'
   session_mode           TEXT DEFAULT 'shared',
   priority               INTEGER DEFAULT 0,
-  threads                INTEGER,
-  thread_filter          TEXT,
   created_at             TEXT NOT NULL,
   UNIQUE(messaging_group_id, agent_group_id)
 );
-CREATE INDEX idx_mga_messaging_group_thread_filter
-  ON messaging_group_agents(messaging_group_id, thread_filter);
 ```
 
 - `session_mode`: `shared` (one session per channel), `per-thread` (one per thread), `agent-shared` (one per agent group across all channels).
 - `engage_mode` / `engage_pattern` / `sender_scope` / `ignored_message_policy`: four orthogonal axes (migration 010) that replaced v1's opaque `trigger_rules` JSON + `response_scope` enum. `engage_mode='pattern'` requires `engage_pattern` (`'.'` matches every message — the "always respond" flavor); `sender_scope='known'` restricts engagement to group members; `ignored_message_policy='accumulate'` keeps ignored messages as context instead of dropping them.
-- `threads`: nullable per-wiring override. `NULL` inherits the adapter's DM/group declaration; `1` preserves platform thread IDs and `0` collapses them, bounded by the adapter's actual thread capability.
-- `thread_filter`: nullable exact platform thread/topic ID (migration 023). `NULL` keeps legacy fanout. A non-NULL value is compared after thread-policy resolution and before engagement, access, accumulation, session creation, and container wake. Telegram forum values use the complete adapter ID (`telegram:<chat_id>:<topic_id>`), not only the numeric topic ID. Duplicate non-NULL filters are allowed and intentionally fan out, so single-domain deployments must audit them operationally.
 - **Side effect:** creating a wiring must also populate `agent_destinations` — don't mutate one without the other (see §1.10).
 
 ### 1.4 `users`
@@ -321,7 +320,6 @@ CREATE TABLE container_configs (
   image_tag              TEXT,
   assistant_name         TEXT,
   max_messages_per_prompt INTEGER,
-  idle_timeout_ms        INTEGER,                         -- NULL/0 disables clean idle exit
   skills                 TEXT NOT NULL DEFAULT '"all"',
   mcp_servers            TEXT NOT NULL DEFAULT '{}',
   packages_apt           TEXT NOT NULL DEFAULT '[]',
@@ -440,10 +438,41 @@ Several early migrations were later renamed/retired and replaced by "module" fil
 | 18 | `approvals-approver-user-id` | `018-approvals-approver-user-id.ts` | `pending_approvals.approver_user_id` — names a single required approver for a2a message-gate policies |
 | 19 | `wiring-threads-override` | `019-wiring-threads.ts` | `messaging_group_agents.threads` — per-wiring thread-policy override (NULL = adapter default) |
 | 20 | `container-config-timezone` | `020-container-config-timezone.ts` | `container_configs.timezone` — per-agent-group timezone override (NULL = install-global) |
-| 21 | `container-idle-timeout` | `021-container-idle-timeout.ts` | `container_configs.idle_timeout_ms` — per-agent-group idle timeout override |
-| 22 | `approval-question-render-metadata` | `022-approval-question.ts` | `question` card-body column on all three approval tables so terminal edits retain the original request |
-| 23 | `wiring-thread-filter` | `023-wiring-thread-filter.ts` | `messaging_group_agents.thread_filter` plus its messaging-group lookup index |
+| 21 | `approval-question-render-metadata` | `021-approval-question.ts` | `question` card-body column on all three approval tables so terminal edits retain the original request |
+| 22 | `messaging-group-detached-at` | `022-messaging-group-detached.ts` | `messaging_groups.detached_at` — records when the bot left a channel without deleting its wiring |
 
 Numbers 5 and 6 are intentionally absent — migrations were renumbered during early development.
 
 Session DB schemas (`INBOUND_SCHEMA`, `OUTBOUND_SCHEMA`) are **not** versioned here. They're `CREATE TABLE IF NOT EXISTS` so new columns land via the session-DB lazy migration helpers (`migrateDeliveredTable()` etc.) when a session file from an older build is reopened. See [db-session.md](db-session.md).
+
+## 3. Portable SQL rules
+
+Central-DB runtime SQL must work on SQLite and installed remote backends. Session mailbox SQL is outside this rule because `inbound.db` and `outbound.db` remain direct SQLite.
+
+- Use `INSERT ... ON CONFLICT (...) DO NOTHING` instead of `INSERT OR IGNORE`.
+- Use `INSERT ... ON CONFLICT (...) DO UPDATE SET ... = excluded....` instead of `INSERT OR REPLACE`; replacement deletes and recreates a row and is not portable.
+- Never use `rowid` for runtime ordering. Declare a stable domain-column order, with a deterministic key as the final tie-breaker.
+- Use snake_case aliases because remote SQL engines may fold unquoted identifiers to lowercase.
+- Use `IS NOT DISTINCT FROM ?` when nullable equality is required. `IS ?` is SQLite-only, while `=` does not match two NULL values.
+- Keep named parameters in the existing `@name` form. The backend driver owns placeholder rewriting.
+- Store timestamps as ISO-8601 UTC text produced by `new Date().toISOString()`. Portable central-DB SQL compares the consistently shaped text directly; SQLite-only operational snippets may use `datetime()` around both sides.
+- Central migrations added after the async DB boundary must use the backend-neutral driver API and portable SQL. Backend-specific schema work belongs in a named migration override.
+
+## 4. Migration execution
+
+`runMigrations()` has three modes:
+
+- `auto` migrates SQLite and validates non-SQLite backends.
+- `validate` performs no DDL and refuses startup when the ledger is missing or pending.
+- `migrate` applies migrations and is used by `pnpm run migrate` under the migration-owner role.
+
+Backends may provide three narrow hooks: baseline bootstrap, name-keyed
+migration overrides, and a lock around the complete migration run. Legacy
+SQLite-only migrations are frozen by name; a non-SQLite backend must cover
+them in its baseline or provide an override. Foreign-key PRAGMA handling is
+never attempted outside SQLite.
+
+Host startup uses `auto`; production schema changes are a separate operator
+step. `scripts/q.ts` sends only the canonical `data/v2.db` path through the
+installed composition. Explicit `inbound.db` and `outbound.db` paths always
+remain local SQLite files and retain their journal mode.

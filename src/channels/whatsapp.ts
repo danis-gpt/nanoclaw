@@ -535,16 +535,18 @@ registerChannelAdapter('whatsapp', {
       // `state.creds.me` is set as part of the QR / pairing-code handshake
       // and is the authoritative "this socket has an account" signal.
       if (phoneNumber && !state.creds.me) {
-        setTimeout(async () => {
-          try {
-            const code = await sock.requestPairingCode(phoneNumber);
-            log.info(`WhatsApp pairing code: ${code}`);
-            log.info('Enter in WhatsApp > Linked Devices > Link with phone number');
-            fs.writeFileSync(pairingCodeFile, code, 'utf-8');
-            // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
-          } catch (err) {
-            log.error('Failed to request pairing code', { err });
-          }
+        setTimeout(() => {
+          void (async () => {
+            try {
+              const code = await sock.requestPairingCode(phoneNumber);
+              log.info(`WhatsApp pairing code: ${code}`);
+              log.info('Enter in WhatsApp > Linked Devices > Link with phone number');
+              fs.writeFileSync(pairingCodeFile, code, 'utf-8');
+              // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
+            } catch (err) {
+              log.error('Failed to request pairing code', { err });
+            }
+          })();
         }, 3000);
       }
 
@@ -553,7 +555,7 @@ registerChannelAdapter('whatsapp', {
 
         if (qr && !phoneNumber) {
           // QR code auth — print to terminal
-          (async () => {
+          void (async () => {
             try {
               const QRCode = await import('qrcode');
               const qrText = await QRCode.toString(qr, { type: 'terminal' });
@@ -667,7 +669,9 @@ registerChannelAdapter('whatsapp', {
         }
       });
 
-      sock.ev.on('creds.update', saveCreds);
+      sock.ev.on('creds.update', () => {
+        void saveCreds();
+      });
 
       // LID ↔ phone mapping updates (v7 replaces chats.phoneNumberShare)
       sock.ev.on('lid-mapping.update', ({ lid, pn }) => {
@@ -679,6 +683,7 @@ registerChannelAdapter('whatsapp', {
       });
 
       // Inbound messages
+      // eslint-disable-next-line @typescript-eslint/no-misused-promises -- Baileys invokes async event handlers without using their return value
       sock.ev.on('messages.upsert', async ({ messages }) => {
         for (const msg of messages) {
           try {
@@ -785,7 +790,7 @@ registerChannelAdapter('whatsapp', {
             };
 
             // WhatsApp doesn't use threads — threadId is null
-            setupConfig.onInbound(chatJid, null, inbound);
+            await setupConfig.onInbound(chatJid, null, inbound);
             // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
           } catch (err) {
             log.error('Error processing incoming WhatsApp message', {
@@ -917,7 +922,7 @@ registerChannelAdapter('whatsapp', {
       async teardown() {
         shuttingDown = true;
         connected = false;
-        sock?.end(undefined);
+        await sock?.end(undefined);
         log.info('WhatsApp adapter shut down');
       },
 

@@ -18,14 +18,14 @@ import { registerResource } from '../crud.js';
  * src/modules/agent-to-agent/db/agent-destinations.ts.
  */
 export async function projectDestinationsToSessions(agentGroupId: string): Promise<void> {
-  if (!hasTable(getDb(), 'agent_destinations')) return;
+  if (!(await hasTable(getDb(), 'agent_destinations'))) return;
   const { writeDestinations } = await import('../../modules/agent-to-agent/write-destinations.js');
-  for (const session of getSessionsByAgentGroup(agentGroupId)) {
+  for (const session of await getSessionsByAgentGroup(agentGroupId)) {
     try {
-      writeDestinations(agentGroupId, session.id);
       // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
+      await writeDestinations(agentGroupId, session.id);
     } catch (err) {
-      log.warn('Failed to project destinations to session inbound.db', { agentGroupId, sessionId: session.id, err });
+      log.warn('Failed to project destinations to session mailbox', { agentGroupId, sessionId: session.id, err });
     }
   }
 }
@@ -75,9 +75,8 @@ registerResource({
         const params: unknown[] = [];
         const where = agentGroupId ? 'WHERE ad.agent_group_id = ?' : '';
         if (agentGroupId) params.push(agentGroupId);
-        return getDb()
-          .prepare(
-            `SELECT
+        return getDb().all(
+          `SELECT
                ad.agent_group_id,
                ad.local_name,
                ad.target_type,
@@ -90,8 +89,8 @@ registerResource({
              LEFT JOIN agent_groups ag ON ad.target_type = 'agent' AND ad.target_id = ag.id
              ${where}
              ORDER BY ad.agent_group_id, ad.local_name`,
-          )
-          .all(...params);
+          ...params,
+        );
       },
     },
     add: {
@@ -108,12 +107,15 @@ registerResource({
           throw new Error('--target-type must be channel or agent');
         }
         if (!targetId) throw new Error('--target-id is required');
-        getDb()
-          .prepare(
-            `INSERT INTO agent_destinations (agent_group_id, local_name, target_type, target_id, created_at)
-             VALUES (?, ?, ?, ?, ?)`,
-          )
-          .run(agentGroupId, localName, targetType, targetId, new Date().toISOString());
+        await getDb().run(
+          `INSERT INTO agent_destinations (agent_group_id, local_name, target_type, target_id, created_at)
+           VALUES (?, ?, ?, ?, ?)`,
+          agentGroupId,
+          localName,
+          targetType,
+          targetId,
+          new Date().toISOString(),
+        );
         await projectDestinationsToSessions(agentGroupId);
         return { agent_group_id: agentGroupId, local_name: localName, target_type: targetType, target_id: targetId };
       },
@@ -126,9 +128,11 @@ registerResource({
         const localName = args.local_name as string;
         if (!agentGroupId) throw new Error('--agent-group-id is required');
         if (!localName) throw new Error('--local-name is required');
-        const result = getDb()
-          .prepare('DELETE FROM agent_destinations WHERE agent_group_id = ? AND local_name = ?')
-          .run(agentGroupId, localName);
+        const result = await getDb().run(
+          'DELETE FROM agent_destinations WHERE agent_group_id = ? AND local_name = ?',
+          agentGroupId,
+          localName,
+        );
         if (result.changes === 0) throw new Error('destination not found');
         await projectDestinationsToSessions(agentGroupId);
         return { removed: { agent_group_id: agentGroupId, local_name: localName } };

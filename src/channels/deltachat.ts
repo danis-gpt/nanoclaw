@@ -39,20 +39,19 @@ const OPTIONAL_ENV = ['DC_IMAP_SECURITY', 'DC_SMTP_SECURITY'] as const;
 
 type DcEnv = { [K in (typeof REQUIRED_ENV)[number]]: string } & { [K in (typeof OPTIONAL_ENV)[number]]?: string };
 
-function isDcAdmin(userId: string): boolean {
+async function isDcAdmin(userId: string): Promise<boolean> {
   try {
     const db = getDb();
-    if (!hasTable(db, 'user_roles')) return true;
+    if (!(await hasTable(db, 'user_roles'))) return true;
     return (
-      db
-        .prepare(
-          `SELECT 1 FROM user_roles
+      (await db.get(
+        `SELECT 1 FROM user_roles
        WHERE user_id = ?
          AND (role = 'owner' OR role = 'admin')
          AND agent_group_id IS NULL
        LIMIT 1`,
-        )
-        .get(userId) != null
+        userId,
+      )) != null
     );
     // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
   } catch {
@@ -147,7 +146,7 @@ function createAdapter(env: DcEnv): ChannelAdapter {
           if (/^\/set-avatar$/i.test((msg.text || '').trim()) && msg.file) {
             const userId = `deltachat:${contact.address}`;
             try {
-              if (isDcAdmin(userId)) {
+              if (await isDcAdmin(userId)) {
                 const absPath = resolve(msg.file as string);
                 await dc.rpc.setConfig(accountId, 'selfavatar', absPath);
                 await dc.rpc.sendMsg(accountId, event.chatId, { text: 'Avatar updated.' });
@@ -238,41 +237,45 @@ function createAdapter(env: DcEnv): ChannelAdapter {
 
       // Connectivity watchdog: restart IO if IMAP goes quiet or connectivity drops
       watchdogTimer = setInterval(
-        async () => {
-          try {
-            const conn = await dc.rpc.getConnectivity(accountId);
-            connectivity = conn;
-            if (conn < 3000) {
-              consecutiveBadChecks++;
-              if (consecutiveBadChecks >= 2) {
-                await restartIo(`connectivity=${conn} for 2 consecutive checks`);
+        () => {
+          void (async () => {
+            try {
+              const conn = await dc.rpc.getConnectivity(accountId);
+              connectivity = conn;
+              if (conn < 3000) {
+                consecutiveBadChecks++;
+                if (consecutiveBadChecks >= 2) {
+                  await restartIo(`connectivity=${conn} for 2 consecutive checks`);
+                }
+              } else {
+                consecutiveBadChecks = 0;
               }
-            } else {
-              consecutiveBadChecks = 0;
+              const idleAgeMin = (Date.now() - lastImapIdleTs) / 60000;
+              if (idleAgeMin > 20) {
+                await restartIo(`no IMAP IDLE in ${idleAgeMin.toFixed(0)}min`);
+              }
+              // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
+            } catch (err: unknown) {
+              log.warn('DeltaChat: watchdog error', {
+                err: err instanceof Error ? err.message : String(err),
+              });
             }
-            const idleAgeMin = (Date.now() - lastImapIdleTs) / 60000;
-            if (idleAgeMin > 20) {
-              await restartIo(`no IMAP IDLE in ${idleAgeMin.toFixed(0)}min`);
-            }
-            // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
-          } catch (err: unknown) {
-            log.warn('DeltaChat: watchdog error', {
-              err: err instanceof Error ? err.message : String(err),
-            });
-          }
+          })();
         },
         5 * 60 * 1000,
       );
 
       // Nudge the network stack every 10 minutes (recovers from prolonged idle)
       networkTimer = setInterval(
-        async () => {
-          try {
-            await dc.rpc.maybeNetwork();
-            // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
-          } catch {
-            /* ignore */
-          }
+        () => {
+          void (async () => {
+            try {
+              await dc.rpc.maybeNetwork();
+              // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
+            } catch {
+              /* ignore */
+            }
+          })();
         },
         10 * 60 * 1000,
       );

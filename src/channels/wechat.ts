@@ -152,7 +152,9 @@ registerChannelAdapter('wechat', {
         timestamp: new Date(msg.create_time_ms ?? Date.now()).toISOString(),
       };
 
-      setupConfig.onInbound(platformId, null, inbound);
+      void Promise.resolve(setupConfig.onInbound(platformId, null, inbound)).catch((err) => {
+        log.error('WeChat onInbound failed', { err });
+      });
     }
 
     const adapter: ChannelAdapter = {

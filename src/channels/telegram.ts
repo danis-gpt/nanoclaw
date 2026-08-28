@@ -149,23 +149,23 @@ function aliasFromScopedPlatformId(platformId: string, aliases: Set<TelegramBotA
   return null;
 }
 
-function resolveBotAliasForPlatformId(
+async function resolveBotAliasForPlatformId(
   platformId: string,
   availableAliases: Set<TelegramBotAlias>,
-): TelegramBotAlias | null {
+): Promise<TelegramBotAlias | null> {
   const scopedAlias = aliasFromScopedPlatformId(platformId, availableAliases);
   if (scopedAlias) return scopedAlias;
 
-  const rows = getDb()
-    .prepare(
-      `SELECT ag.folder
+  const rows = await getDb().all<{ folder: string }>(
+    `SELECT ag.folder
          FROM messaging_groups mg
          JOIN messaging_group_agents mga ON mga.messaging_group_id = mg.id
          JOIN agent_groups ag ON ag.id = mga.agent_group_id
         WHERE mg.channel_type = ? AND mg.platform_id = ?
      ORDER BY mga.priority DESC, ag.folder ASC`,
-    )
-    .all(TELEGRAM_CHANNEL_TYPE, platformId) as Array<{ folder: string }>;
+    TELEGRAM_CHANNEL_TYPE,
+    platformId,
+  );
 
   for (const row of rows) {
     if (availableAliases.has(row.folder as TelegramBotAlias)) return row.folder as TelegramBotAlias;
@@ -230,12 +230,12 @@ function createPairingInterceptor(
     try {
       const botUsername = await botUsernamePromise;
       if (!botUsername) {
-        hostOnInbound(effectivePlatformId, threadId, message);
+        await hostOnInbound(effectivePlatformId, threadId, message);
         return;
       }
       const { text, authorUserId } = readInboundFields(message);
       if (!text) {
-        hostOnInbound(effectivePlatformId, threadId, message);
+        await hostOnInbound(effectivePlatformId, threadId, message);
         return;
       }
       const consumed = await tryConsume({
@@ -246,20 +246,20 @@ function createPairingInterceptor(
         adminUserId: authorUserId,
       });
       if (!consumed) {
-        hostOnInbound(effectivePlatformId, threadId, message);
+        await hostOnInbound(effectivePlatformId, threadId, message);
         return;
       }
       // Pairing matched — record the chat and short-circuit so the
       // code-bearing message never reaches an agent. Privilege is now a
       // property of the paired user, not the chat: upsert the user, and if
       // this instance has no owner yet, promote them to owner.
-      const existing = getMessagingGroupByPlatform(TELEGRAM_CHANNEL_TYPE, effectivePlatformId);
+      const existing = await getMessagingGroupByPlatform(TELEGRAM_CHANNEL_TYPE, effectivePlatformId);
       if (existing) {
-        updateMessagingGroup(existing.id, {
+        await updateMessagingGroup(existing.id, {
           is_group: consumed.consumed!.isGroup ? 1 : 0,
         });
       } else {
-        createMessagingGroup({
+        await createMessagingGroup({
           id: `mg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           channel_type: TELEGRAM_CHANNEL_TYPE,
           platform_id: effectivePlatformId,
@@ -271,7 +271,7 @@ function createPairingInterceptor(
       }
 
       const pairedUserId = `telegram:${consumed.consumed!.adminUserId}`;
-      upsertUser({
+      await upsertUser({
         id: pairedUserId,
         kind: 'telegram',
         display_name: null,
@@ -279,8 +279,8 @@ function createPairingInterceptor(
       });
 
       let promotedToOwner = false;
-      if (!hasAnyOwner()) {
-        grantRole({
+      if (!(await hasAnyOwner())) {
+        await grantRole({
           user_id: pairedUserId,
           role: 'owner',
           agent_group_id: null,
@@ -302,7 +302,7 @@ function createPairingInterceptor(
     } catch (err) {
       log.error('Telegram pairing interceptor error', { err });
       // Fail open: pass through so a pairing bug doesn't break normal traffic.
-      hostOnInbound(effectivePlatformId, threadId, message);
+      await hostOnInbound(effectivePlatformId, threadId, message);
     }
   };
 }
@@ -342,12 +342,12 @@ function createTelegramMultiplexer(botConfigs: TelegramBotConfig[]): ChannelAdap
   const availableAliases = new Set<TelegramBotAlias>(byAlias.keys());
   const defaultBridge = byAlias.get(DEFAULT_BOT_ALIAS) ?? bridges[0]!;
 
-  function resolveBridge(platformId: string): TelegramBotBridge {
-    const alias = resolveBotAliasForPlatformId(platformId, availableAliases);
+  async function resolveBridge(platformId: string): Promise<TelegramBotBridge> {
+    const alias = await resolveBotAliasForPlatformId(platformId, availableAliases);
     if (alias) return byAlias.get(alias)!;
 
     const allKnownAliases = new Set<TelegramBotAlias>(TELEGRAM_BOT_CONFIGS.map((c) => c.alias));
-    const configuredAgentAlias = resolveBotAliasForPlatformId(platformId, allKnownAliases);
+    const configuredAgentAlias = await resolveBotAliasForPlatformId(platformId, allKnownAliases);
     if (configuredAgentAlias && configuredAgentAlias !== DEFAULT_BOT_ALIAS) {
       throw new Error(
         `Telegram bot token missing for agent folder ${configuredAgentAlias}; refusing to send via default bot`,
@@ -395,17 +395,17 @@ function createTelegramMultiplexer(botConfigs: TelegramBotConfig[]): ChannelAdap
     },
 
     async deliver(platformId, threadId, message) {
-      const bridge = resolveBridge(platformId);
+      const bridge = await resolveBridge(platformId);
       return bridge.bridge.deliver(rawTelegramPlatformId(platformId, availableAliases), threadId, message);
     },
 
     async setTyping(platformId, threadId) {
-      const bridge = resolveBridge(platformId);
+      const bridge = await resolveBridge(platformId);
       await bridge.bridge.setTyping?.(rawTelegramPlatformId(platformId, availableAliases), threadId);
     },
 
     async resolveChannelName(platformId: string) {
-      const bridge = resolveBridge(platformId);
+      const bridge = await resolveBridge(platformId);
       const rawPlatformId = rawTelegramPlatformId(platformId, availableAliases);
       const chatId = rawPlatformId.split(':').slice(1).join(':');
       if (!chatId) return null;
@@ -424,7 +424,7 @@ function createTelegramMultiplexer(botConfigs: TelegramBotConfig[]): ChannelAdap
     },
 
     async subscribe(platformId, threadId) {
-      const bridge = resolveBridge(platformId);
+      const bridge = await resolveBridge(platformId);
       await bridge.bridge.subscribe?.(rawTelegramPlatformId(platformId, availableAliases), threadId);
     },
   };

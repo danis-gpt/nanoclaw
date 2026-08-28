@@ -79,7 +79,9 @@ export interface CodexProviderContributionDeps {
   autoEscalationMinScore: number;
   autoEscalationLongPromptChars: number;
   socketExists: (socketPath: string) => boolean;
-  getAgentGroup: (agentGroupId: string) => { id: string; folder: string } | undefined;
+  getAgentGroup: (
+    agentGroupId: string,
+  ) => Promise<{ id: string; folder: string } | undefined> | { id: string; folder: string } | undefined;
   writeGrant: (grantsDir: string, grant: CodexBrokerGrant) => void;
   prepareAgentCodexHome: (sourceHome: string, agentHome: string) => void;
   randomToken: () => string;
@@ -107,10 +109,10 @@ function realDeps(): CodexProviderContributionDeps {
   };
 }
 
-export function buildCodexProviderContribution(
+export async function buildCodexProviderContribution(
   { sessionDir, agentGroupId }: ProviderContainerContext,
   deps: CodexProviderContributionDeps = realDeps(),
-): ProviderContainerContribution {
+): Promise<ProviderContainerContribution> {
   if (deps.mode === 'native') {
     deps.prepareAgentCodexHome(deps.codexHome, deps.agentCodexHome);
 
@@ -136,7 +138,7 @@ export function buildCodexProviderContribution(
     throw new Error(`Codex broker socket does not exist: ${deps.brokerSocket}`);
   }
 
-  const agentGroup = deps.getAgentGroup(agentGroupId);
+  const agentGroup = await deps.getAgentGroup(agentGroupId);
   if (!agentGroup) {
     throw new Error(`Codex broker grant failed: unknown agent group ${agentGroupId}`);
   }

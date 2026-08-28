@@ -81,7 +81,10 @@ function createEmacsAdapter(opts: EmacsAdapterOptions): ChannelAdapter {
       };
 
       try {
-        setupConfig?.onInbound(opts.platformId, null, inbound);
+        const inboundResult = setupConfig?.onInbound(opts.platformId, null, inbound);
+        void Promise.resolve(inboundResult).catch((err) => {
+          log.error('Emacs onInbound failed', { err });
+        });
         // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch (err) {
         log.error('Emacs onInbound failed', { err });
