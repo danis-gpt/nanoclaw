@@ -18,11 +18,13 @@ vi.mock('../log.js', () => ({
 import {
   configuredDriverKind,
   createSessionDriver,
+  dockerNetworkArgs,
   getSessionDriver,
   mountPolicy,
   readSetting,
   resetSessionDriver,
 } from './index.js';
+import { fixtureSpec } from './spec-fixture.js';
 // Imported from the registry module, not the barrel that re-exports it: this is
 // the entry point an overlay reaches for, and it has to work without the
 // selection module having been evaluated first.
@@ -76,6 +78,12 @@ beforeEach(() => {
 afterEach(() => {
   resetSessionDriver(null);
   process.chdir(previous);
+});
+
+describe('runtime network defaults', () => {
+  it('does not pass Docker host-gateway syntax to Podman', () => {
+    expect(dockerNetworkArgs(fixtureSpec())).toEqual([]);
+  });
 });
 
 describe('configuredDriverKind', () => {

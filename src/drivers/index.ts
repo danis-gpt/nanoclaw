@@ -40,6 +40,7 @@ import os from 'os';
 import path from 'path';
 
 import { DATA_DIR, GROUPS_DIR } from '../config.js';
+import { CONTAINER_RUNTIME_BIN } from '../container-runtime.js';
 import { EGRESS_NETWORK, egressNetworkArgs, ensureEgressNetwork } from '../egress-lockdown.js';
 import { readEnvFile } from '../env.js';
 import { log } from '../log.js';
@@ -70,16 +71,19 @@ export function readSetting(key: (typeof SETTINGS)[number], env: NodeJS.ProcessE
 /**
  * Docker's network topology, decided at spawn: the egress-lockdown network
  * when the flag is on (throws rather than spawning with open egress), else the
- * host-gateway mapping Linux needs to reach host services. Injected at
+ * Docker host-gateway mapping Linux needs to reach host services. Rootless
+ * Podman supplies host.containers.internal itself and rejects Docker's
+ * `host-gateway` sentinel through its remote client. Injected at
  * registration — the driver stays constructible without it in tests, and
  * composition never sees an argv-shaped network selection: `spec.network`
  * states the intent, this realizes it, and nothing rides between them.
  */
-function dockerNetworkArgs(spec: SessionSpec): string[] {
+export function dockerNetworkArgs(spec: SessionSpec): string[] {
   if (ensureEgressNetwork()) {
     log.info('Egress lockdown active', { containerName: agentContainerName(spec), network: EGRESS_NETWORK });
     return egressNetworkArgs();
   }
+  if (CONTAINER_RUNTIME_BIN === 'podman') return [];
   return os.platform() === 'linux' ? ['--add-host=host.docker.internal:host-gateway'] : [];
 }
 
