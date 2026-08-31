@@ -2,7 +2,39 @@ import fs from 'fs';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
 
-import { hardeningArgs, resolveProviderName } from './container-runner.js';
+import { ensureAgentGroupImage, hardeningArgs, resolveProviderName } from './container-runner.js';
+
+describe('ensureAgentGroupImage', () => {
+  it('rebuilds a missing configured image before spawn', async () => {
+    const rebuilt: string[] = [];
+    await ensureAgentGroupImage(
+      'ag-a',
+      { imageTag: 'localhost/nanoclaw-agent:ag-a', packages: { apt: ['python3'], npm: [] } },
+      {
+        imageExists: async () => false,
+        rebuild: async (agentGroupId) => {
+          rebuilt.push(agentGroupId);
+        },
+      },
+    );
+    expect(rebuilt).toEqual(['ag-a']);
+  });
+
+  it('does not rebuild an existing configured image', async () => {
+    let rebuilds = 0;
+    await ensureAgentGroupImage(
+      'ag-a',
+      { imageTag: 'localhost/nanoclaw-agent:ag-a', packages: { apt: ['python3'], npm: [] } },
+      {
+        imageExists: async () => true,
+        rebuild: async () => {
+          rebuilds += 1;
+        },
+      },
+    );
+    expect(rebuilds).toBe(0);
+  });
+});
 
 describe('resolveProviderName', () => {
   it('prefers session over container config', () => {

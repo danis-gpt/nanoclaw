@@ -3,7 +3,7 @@
  * Spawns agent containers with session folder + agent group folder mounts.
  * The container runs the v2 agent-runner which polls the session DB.
  */
-import { ChildProcess, exec, spawn } from 'child_process';
+import { ChildProcess, exec, execFileSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
@@ -35,6 +35,7 @@ import { getDb, hasTable } from './db/connection.js';
 import { initGroupFilesystem } from './group-init.js';
 import { stopTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
+import { reconcileImagePins } from './image-pins.js';
 import { validateAdditionalMounts } from './modules/mount-security/index.js';
 // Provider host-side config barrel — each provider that needs host-side
 // container setup self-registers on import.
@@ -132,6 +133,7 @@ async function spawnContainer(session: Session): Promise<void> {
   // the config object, threaded through provider resolution, buildMounts,
   // and buildContainerArgs so we don't re-read.
   const containerConfig = materializeContainerJson(agentGroup.id);
+  await ensureAgentGroupImage(agentGroup.id, containerConfig);
 
   // Per-group filesystem state lives forever after first creation. Init is
   // idempotent: it only writes paths that don't already exist, so this call
@@ -585,6 +587,39 @@ async function buildContainerArgs(
 
 const execAsync = promisify(exec);
 
+interface AgentImageCheckDeps {
+  imageExists(image: string): Promise<boolean>;
+  rebuild(agentGroupId: string): Promise<void>;
+}
+
+const hostAgentImageCheckDeps: AgentImageCheckDeps = {
+  async imageExists(image) {
+    try {
+      execFileSync(CONTAINER_RUNTIME_BIN, ['image', 'inspect', image], { stdio: 'ignore' });
+      return true;
+      // eslint-disable-next-line no-catch-all/no-catch-all -- inspect failure means the image is unavailable and triggers the safe rebuild path
+    } catch {
+      return false;
+    }
+  },
+  rebuild: buildAgentGroupImage,
+};
+
+export async function ensureAgentGroupImage(
+  agentGroupId: string,
+  config: Pick<import('./container-config.js').ContainerConfig, 'imageTag' | 'packages'>,
+  deps: AgentImageCheckDeps = hostAgentImageCheckDeps,
+): Promise<void> {
+  if (!config.imageTag || (await deps.imageExists(config.imageTag))) return;
+  if (config.packages.apt.length === 0 && config.packages.npm.length === 0) {
+    throw new Error(
+      `Configured agent image is missing and cannot be rebuilt without package metadata: ${config.imageTag}`,
+    );
+  }
+  log.warn('Configured agent image is missing; rebuilding before spawn', { agentGroupId, image: config.imageTag });
+  await deps.rebuild(agentGroupId);
+}
+
 /** Build a per-agent-group Docker image with custom packages. */
 export async function buildAgentGroupImage(agentGroupId: string): Promise<void> {
   const agentGroup = getAgentGroup(agentGroupId);
@@ -658,6 +693,8 @@ export async function buildAgentGroupImage(agentGroupId: string): Promise<void> 
 
   // Store the image tag in the DB
   updateContainerConfigScalars(agentGroup.id, { image_tag: imageTag });
+
+  await reconcileImagePins();
 
   log.info('Per-agent-group image built', { agentGroupId, imageTag });
 }
