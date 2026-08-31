@@ -216,6 +216,8 @@ export interface RequestApprovalOptions {
   question: string;
   /** Deliver the card to this specific user instead of all of the session group's admins. */
   approverUserId?: string;
+  /** Optional domain expiry. Callers that require time-bounded grants set this explicitly. */
+  expiresAt?: string;
 }
 
 /**
@@ -225,7 +227,7 @@ export interface RequestApprovalOptions {
  * approval handler for this action via the response dispatcher.
  */
 export async function requestApproval(opts: RequestApprovalOptions): Promise<void> {
-  const { session, action, payload, title, question, agentName, approverUserId } = opts;
+  const { session, action, payload, title, question, agentName, approverUserId, expiresAt } = opts;
 
   const approvers = approverUserId ? [approverUserId] : await pickApprover(session.agent_group_id);
   if (approvers.length === 0) {
@@ -260,6 +262,7 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<voi
     question,
     options_json: JSON.stringify(normalizedOptions),
     approver_user_id: approverUserId ?? null,
+    expires_at: expiresAt ?? null,
   });
 
   const adapter = getDeliveryAdapter();

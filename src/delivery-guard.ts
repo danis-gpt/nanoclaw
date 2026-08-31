@@ -11,7 +11,11 @@ import { log } from './log.js';
 import type { PendingApproval, Session } from './types.js';
 
 /** Handler shape for guard-wrapped actions — must not touch inDb (replays run without one). */
-export type GuardedDeliveryHandler = (content: Record<string, unknown>, session: Session) => Promise<void>;
+export type GuardedDeliveryHandler = (
+  content: Record<string, unknown>,
+  session: Session,
+  grant: PendingApproval | null,
+) => Promise<void>;
 
 export interface DeliveryGuardSpec {
   /** Guard action consulted before the handler runs — the defined value, not a name. */
@@ -59,5 +63,5 @@ export async function runGuarded(
     await spec.requestHold(content, session);
     return;
   }
-  await handler(content, session);
+  await handler(content, session, grant);
 }

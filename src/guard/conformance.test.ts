@@ -50,6 +50,7 @@ describe('guard conformance', () => {
       'self_mod.add_mcp_server',
       'senders.admit',
       'channels.register',
+      'idea_feature.mutate',
     ]) {
       expect(actions.has(expected), `catalog is missing "${expected}"`).toBe(true);
     }
