@@ -159,16 +159,24 @@ export function packageArtha17Release({ repo, artifactDir, includeRuntimeDepende
     const sourceArchive = path.join(stage, 'source.tar');
     const sourceRoot = path.join(stage, 'source');
     fs.mkdirSync(sourceRoot, { mode: 0o700 });
+    const metadataSymlinksExcludedFromBuild = new Set(['.agents/skills', 'AGENTS.md']);
     const unsafeTrackedEntries = command('/usr/bin/git', ['ls-tree', '-r', sourceCommit], exactRepo)
       .split('\n')
-      .filter((line) => line && !line.startsWith('100644 ') && !line.startsWith('100755 '));
+      .filter((line) => {
+        if (!line || line.startsWith('100644 ') || line.startsWith('100755 ')) return false;
+        return !metadataSymlinksExcludedFromBuild.has(line.slice(line.indexOf('\t') + 1));
+      });
     if (unsafeTrackedEntries.length > 0)
       throw new Error('source commit contains non-regular entries and cannot be packaged safely');
     execFileSync('/usr/bin/git', ['archive', '--format=tar', `--output=${sourceArchive}`, sourceCommit], {
       cwd: exactRepo,
       stdio: ['ignore', 'ignore', 'pipe'],
     });
-    execFileSync('/usr/bin/tar', ['-xf', sourceArchive, '-C', sourceRoot], { stdio: ['ignore', 'ignore', 'pipe'] });
+    execFileSync(
+      '/usr/bin/tar',
+      ['-xf', sourceArchive, '-C', sourceRoot, '--exclude=.agents/skills', '--exclude=AGENTS.md'],
+      { stdio: ['ignore', 'ignore', 'pipe'] },
+    );
     fs.unlinkSync(sourceArchive);
     const sourceModules = path.join(sourceRoot, 'node_modules');
     fs.symlinkSync(path.join(exactRepo, 'node_modules'), sourceModules, 'dir');

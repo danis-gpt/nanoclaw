@@ -33,6 +33,7 @@ function fixture() {
     "import Database from 'better-sqlite3'; export async function runOfflineRoleRecovery(argv: string[]) { if (argv[0] !== 'revoke') throw new Error('only revoke'); const db = new Database(':memory:'); db.close(); return {revoked:true}; }\n",
   );
   fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules\ndist\n');
+  fs.symlinkSync('src/a.js', path.join(repo, 'AGENTS.md'));
   fs.symlinkSync(path.join(process.cwd(), 'node_modules'), path.join(repo, 'node_modules'), 'dir');
   execFileSync('/usr/bin/git', ['init', '-q'], { cwd: repo });
   execFileSync('/usr/bin/git', ['config', 'user.email', 'test@example.invalid'], { cwd: repo });
