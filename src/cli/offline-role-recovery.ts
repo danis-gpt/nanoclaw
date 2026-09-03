@@ -25,6 +25,8 @@ export interface OfflineRoleRecoveryDependencies {
   expectedDatabasePath: string;
   expectedUid: number;
   assertServiceStopped: () => Promise<void>;
+  /** Test-only race seam; production leaves this undefined. */
+  afterDatabaseFileOpened?: () => void;
 }
 
 interface RecoveryRequest {
@@ -127,13 +129,13 @@ function assertPhysicalDatabase(
       fs.closeSync(directoryFd);
       directoryFd = nextFd;
     }
-    const fdPath = `/proc/self/fd/${directoryFd}/${fileName}`;
-    const linkStat = fs.lstatSync(fdPath);
+    const candidatePath = `/proc/self/fd/${directoryFd}/${fileName}`;
+    const linkStat = fs.lstatSync(candidatePath);
     if (linkStat.isSymbolicLink()) throw new Error('database path contains symlink at file');
     if (!linkStat.isFile()) throw new Error('database must be a regular file');
-    fileFd = fs.openSync(fdPath, fs.constants.O_RDWR | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+    fileFd = fs.openSync(candidatePath, fs.constants.O_RDWR | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
     const fdStat = fs.fstatSync(fileFd);
-    const pathStat = fs.lstatSync(fdPath);
+    const pathStat = fs.lstatSync(candidatePath);
     if (!fdStat.isFile()) throw new Error('database must be a regular file');
     if (fdStat.uid !== expectedUid) throw new Error(`database owner must be effective uid ${expectedUid}`);
     if ((fdStat.mode & 0o777) !== 0o600) throw new Error('database must have exact mode 0600');
@@ -143,7 +145,7 @@ function assertPhysicalDatabase(
       fileFd = undefined;
       throw new Error('database identity changed while opening stable handles');
     }
-    return { directoryFd, fileFd, fdPath };
+    return { directoryFd, fileFd, fdPath: `/proc/self/fd/${fileFd}` };
   } catch (error) {
     if (fileFd !== undefined) fs.closeSync(fileFd);
     fs.closeSync(directoryFd);
@@ -162,20 +164,31 @@ export async function runOfflineRoleRecovery(
   await dependencies.assertServiceStopped();
   const handles = assertPhysicalDatabase(request.database, dependencies.expectedDatabasePath, dependencies.expectedUid);
   try {
+    dependencies.afterDatabaseFileOpened?.();
+    const openedStat = fs.fstatSync(handles.fileFd);
+    if (openedStat.nlink !== 1) throw new Error('validated database was unlinked before SQLite open');
+    if (!openedStat.isFile() || openedStat.uid !== dependencies.expectedUid || (openedStat.mode & 0o777) !== 0o600) {
+      throw new Error('validated database identity changed before SQLite open');
+    }
     initDb(handles.fdPath);
     const before = getUserRoles(request.targetUserId);
-    if (
-      before.length !== 1 ||
-      before[0].role !== request.role ||
-      before[0].agent_group_id !== request.group ||
-      before[0].user_id !== request.expectedUserId
-    ) {
-      throw new Error('recovery requires exactly one existing grant matching expected user, role, and Product group');
-    }
+    const matching = before.filter(
+      (row) =>
+        row.user_id === request.expectedUserId && row.role === request.role && row.agent_group_id === request.group,
+    );
+    if (matching.length !== 1) throw new Error('recovery requires exactly one matching grant');
+    await dependencies.assertServiceStopped();
     revokeRole(request.targetUserId, request.role, request.group);
-    if (getUserRoles(request.targetUserId).length !== 0) {
+    const after = getUserRoles(request.targetUserId);
+    if (
+      after.some(
+        (row) =>
+          row.user_id === request.expectedUserId && row.role === request.role && row.agent_group_id === request.group,
+      )
+    ) {
       throw new Error('canonical read-back did not prove the exact role absent');
     }
+    await dependencies.assertServiceStopped();
     return {
       revoked: { user_id: request.targetUserId, role: request.role, agent_group_id: request.group },
     };
