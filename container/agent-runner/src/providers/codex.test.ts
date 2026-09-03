@@ -7,7 +7,7 @@ import { Readable, Writable } from 'stream';
 import { afterEach, describe, expect, it } from 'bun:test';
 
 import { MEMORY_SESSION_HOOK } from '../memory/session-hook.js';
-import { buildPrompt, CodexProvider, runNativeCodex, type SpawnCodex } from './codex.js';
+import { buildNativeCodexLaunch, buildPrompt, CodexProvider, runNativeCodex, type SpawnCodex } from './codex.js';
 
 interface FakeRun {
   code: number;
@@ -54,6 +54,162 @@ function fakeSpawn(runs: FakeRun[]): {
 }
 
 describe('runNativeCodex', () => {
+  it('keeps HTTP MCP header values out of argv', () => {
+    const launch = buildNativeCodexLaunch(
+      {
+        prompt: 'hello',
+        cwd: '/workspace/agent',
+        mcpServers: {
+          docs: {
+            type: 'http',
+            url: 'http://127.0.0.1:18080/mcp',
+            headers: { Authorization: 'Bearer docs-secret', 'X-Workspace': 'internal-secret' },
+          },
+          nanoclaw: {
+            command: 'bun',
+            args: ['run', '/app/src/mcp-tools/index.ts'],
+          },
+        },
+      },
+      '/tmp/last-message.txt',
+      'gpt-5.3-codex',
+      { PATH: '/usr/bin' },
+    );
+
+    expect(launch.args.join(' ')).toContain('mcp_servers.docs.bearer_token_env_var=');
+    expect(launch.args.join(' ')).toContain('mcp_servers.docs.env_http_headers=');
+    expect(launch.args).toContain('--ignore-user-config');
+    expect(launch.args.join(' ')).not.toContain('docs-secret');
+    expect(launch.args.join(' ')).not.toContain('internal-secret');
+    expect(Object.values(launch.env)).toContain('docs-secret');
+    expect(Object.values(launch.env)).toContain('internal-secret');
+  });
+
+  it('rejects stdio environment values', () => {
+    expect(() =>
+      buildNativeCodexLaunch(
+        {
+          prompt: 'hello',
+          cwd: '/workspace/agent',
+          mcpServers: { local: { command: '/local', env: { API_TOKEN: 'local-secret' } } },
+        },
+        '/tmp/last-message.txt',
+        'gpt-5.3-codex',
+        {},
+      ),
+    ).toThrow('declares stdio environment values');
+  });
+
+  it('rejects credentialed HTTP mixed with an untrusted stdio MCP server', () => {
+    expect(() =>
+      buildNativeCodexLaunch(
+        {
+          prompt: 'hello',
+          cwd: '/workspace/agent',
+          mcpServers: {
+            docs: {
+              type: 'http',
+              url: 'http://127.0.0.1:18080/mcp',
+              headers: { Authorization: 'Bearer docs-secret' },
+            },
+            local: { command: '/local' },
+          },
+        },
+        '/tmp/last-message.txt',
+        'gpt-5.3-codex',
+        {},
+      ),
+    ).toThrow('cannot mix credentialed HTTP MCP with untrusted stdio MCP servers');
+  });
+
+  it('rejects custom stdio arguments', () => {
+    expect(() =>
+      buildNativeCodexLaunch(
+        {
+          prompt: 'hello',
+          cwd: '/workspace/agent',
+          mcpServers: { local: { command: '/local', args: ['--api-token', 'opaque-secret'] } },
+        },
+        '/tmp/last-message.txt',
+        'gpt-5.3-codex',
+        {},
+      ),
+    ).toThrow('declares custom stdio arguments');
+  });
+
+  it('rejects a spoofed built-in NanoClaw server beside credentialed HTTP', () => {
+    expect(() =>
+      buildNativeCodexLaunch(
+        {
+          prompt: 'hello',
+          cwd: '/workspace/agent',
+          mcpServers: {
+            docs: {
+              type: 'http',
+              url: 'http://127.0.0.1:18080/mcp',
+              headers: { Authorization: 'Bearer docs-secret' },
+            },
+            nanoclaw: {
+              command: 'bun',
+              args: ['run', '/workspace/agent/evil/mcp-tools/index.ts'],
+              cwd: '/workspace/agent/evil',
+            },
+          },
+        },
+        '/tmp/last-message.txt',
+        'gpt-5.3-codex',
+        {},
+      ),
+    ).toThrow('cannot mix credentialed HTTP MCP with untrusted stdio MCP servers');
+  });
+
+  it('keeps HTTP header environment names distinct', () => {
+    const launch = buildNativeCodexLaunch(
+      {
+        prompt: 'hello',
+        cwd: '/workspace/agent',
+        mcpServers: {
+          'a-b': { type: 'http', url: 'http://127.0.0.1:18080/mcp', headers: { Authorization: 'Bearer first' } },
+          a_b: { type: 'http', url: 'http://127.0.0.1:18081/mcp', headers: { Authorization: 'Bearer second' } },
+        },
+      },
+      '/tmp/last-message.txt',
+      'gpt-5.3-codex',
+      {},
+    );
+
+    const bearerVariables = launch.args
+      .filter((arg) => arg.includes('.bearer_token_env_var='))
+      .map((arg) => arg.split('=', 2)[1]);
+    expect(new Set(bearerVariables).size).toBe(2);
+  });
+
+  it('passes the built-in NanoClaw MCP server to native Codex', async () => {
+    process.env.CODEX_DEFAULT_MODEL = 'gpt-5.3-codex';
+    const { spawn, calls } = fakeSpawn([
+      {
+        code: 0,
+        stdout: [{ type: 'item.completed', item: { type: 'agent_message', text: 'sent' } }],
+      },
+    ]);
+    const request = {
+      prompt: 'send the report as a file',
+      cwd: '/workspace/agent',
+      modelHint: 'default' as const,
+      mcpServers: {
+        nanoclaw: {
+          command: 'bun',
+          args: ['run', '/app/src/mcp-tools/index.ts'],
+        },
+      },
+    };
+
+    await runNativeCodex(request, { spawn, collectReferencedGeneratedFiles: () => [] });
+
+    expect(calls[0].args.join(' ')).toContain('mcp_servers.nanoclaw.command=\"bun\"');
+    expect(calls[0].args.join(' ')).toContain('/app/src/mcp-tools/index.ts');
+  });
+
   it('starts codex exec inside the agent container cwd', async () => {
     process.env.CODEX_DEFAULT_MODEL = 'gpt-5.3-codex';
     const { spawn, calls } = fakeSpawn([
