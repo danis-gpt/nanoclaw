@@ -14,7 +14,9 @@ import {
 const roots: string[] = [];
 const USER = 'tg:approved-human';
 
-function fixture(grants = [{ role: 'product_approver', group: PRODUCT_AGENT_GROUP_ID }]) {
+type FixtureGrant = { role: string; group: string | null; user?: string };
+
+function fixture(grants: FixtureGrant[] = [{ role: 'product_approver', group: PRODUCT_AGENT_GROUP_ID }]) {
   const root = fs.mkdtempSync(path.join(os.homedir(), '.artha-role-recovery-test-'));
   roots.push(root);
   fs.chmodSync(root, 0o700);
@@ -32,7 +34,8 @@ function fixture(grants = [{ role: 'product_approver', group: PRODUCT_AGENT_GROU
   const insert = db.prepare(
     'INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, ?, ?, ?, ?)',
   );
-  for (const grant of grants) insert.run(USER, grant.role, grant.group, 'operator', '2026-09-02T00:00:00.000Z');
+  for (const grant of grants)
+    insert.run(grant.user ?? USER, grant.role, grant.group, 'operator', '2026-09-02T00:00:00.000Z');
   db.close();
   fs.chmodSync(dbPath, 0o600);
   const assertServiceStopped = vi.fn(async () => undefined);
@@ -67,7 +70,7 @@ describe('offline role recovery', () => {
     await expect(runOfflineRoleRecovery(args(f.dbPath), f.deps)).resolves.toEqual({
       revoked: { user_id: USER, role: 'product_approver', agent_group_id: PRODUCT_AGENT_GROUP_ID },
     });
-    expect(f.assertServiceStopped).toHaveBeenCalledOnce();
+    expect(f.assertServiceStopped).toHaveBeenCalledTimes(3);
     const db = new Database(f.dbPath, { readonly: true });
     expect(db.prepare('SELECT * FROM user_roles').all()).toEqual([]);
     db.close();
@@ -111,17 +114,32 @@ describe('offline role recovery', () => {
     db.close();
   });
 
-  it('rejects ambiguity instead of choosing one of several grants', async () => {
+  it('preserves unrelated owner and other-user grants while revoking one exact domain grant', async () => {
+    const f = fixture([
+      { role: 'technical_approver', group: PRODUCT_AGENT_GROUP_ID },
+      { role: 'owner', group: null },
+      { user: 'tg:other', role: 'product_approver', group: PRODUCT_AGENT_GROUP_ID },
+    ]);
+    await expect(runOfflineRoleRecovery(args(f.dbPath, { role: 'technical_approver' }), f.deps)).resolves.toBeDefined();
+    const db = new Database(f.dbPath, { readonly: true });
+    expect(db.prepare('SELECT user_id, role, agent_group_id FROM user_roles ORDER BY user_id, role').all()).toEqual([
+      { user_id: USER, role: 'owner', agent_group_id: null },
+      { user_id: 'tg:other', role: 'product_approver', agent_group_id: PRODUCT_AGENT_GROUP_ID },
+    ]);
+    db.close();
+  });
+
+  it('rejects duplicate exact grants instead of revoking ambiguously', async () => {
     const f = fixture([
       { role: 'product_approver', group: PRODUCT_AGENT_GROUP_ID },
-      { role: 'technical_approver', group: PRODUCT_AGENT_GROUP_ID },
+      { role: 'product_approver', group: PRODUCT_AGENT_GROUP_ID },
     ]);
-    await expect(runOfflineRoleRecovery(args(f.dbPath), f.deps)).rejects.toThrow('exactly one existing grant');
+    await expect(runOfflineRoleRecovery(args(f.dbPath), f.deps)).rejects.toThrow('exactly one matching grant');
   });
 
   it('rejects absent exact grant and requires canonical read-back', async () => {
     const f = fixture([]);
-    await expect(runOfflineRoleRecovery(args(f.dbPath), f.deps)).rejects.toThrow('exactly one existing grant');
+    await expect(runOfflineRoleRecovery(args(f.dbPath), f.deps)).rejects.toThrow('exactly one matching grant');
   });
 
   it('rejects path, owner, mode, type, hardlink, and symlink drift', async () => {
@@ -167,5 +185,65 @@ describe('offline role recovery', () => {
     fs.unlinkSync(f.dbPath);
     fs.mkdirSync(f.dbPath, { mode: 0o700 });
     await expect(runOfflineRoleRecovery(args(f.dbPath), f.deps)).rejects.toThrow('regular file');
+  });
+
+  it('binds SQLite mutation to the validated file inode across a pathname replacement', async () => {
+    const f = fixture();
+    const validated = path.join(f.root, 'validated.db');
+    const hooked = {
+      ...f.deps,
+      afterDatabaseFileOpened: () => {
+        fs.renameSync(f.dbPath, validated);
+        const replacement = new Database(f.dbPath);
+        replacement.exec(`CREATE TABLE user_roles (
+          user_id TEXT NOT NULL, role TEXT NOT NULL, agent_group_id TEXT,
+          granted_by TEXT, granted_at TEXT NOT NULL
+        )`);
+        replacement
+          .prepare('INSERT INTO user_roles VALUES (?, ?, ?, ?, ?)')
+          .run(USER, 'product_approver', PRODUCT_AGENT_GROUP_ID, 'attacker', '2026-09-02T00:00:00.000Z');
+        replacement.close();
+        fs.chmodSync(f.dbPath, 0o600);
+      },
+    } as OfflineRoleRecoveryDependencies;
+    await expect(runOfflineRoleRecovery(args(f.dbPath), hooked)).resolves.toBeDefined();
+    const original = new Database(validated, { readonly: true });
+    const replacement = new Database(f.dbPath, { readonly: true });
+    expect(original.prepare('SELECT count(*) AS n FROM user_roles').get()).toEqual({ n: 0 });
+    expect(replacement.prepare('SELECT count(*) AS n FROM user_roles').get()).toEqual({ n: 1 });
+    original.close();
+    replacement.close();
+  });
+
+  it('fails closed if the validated inode is unlinked before SQLite opens', async () => {
+    const f = fixture();
+    const hooked = {
+      ...f.deps,
+      afterDatabaseFileOpened: () => fs.unlinkSync(f.dbPath),
+    } as OfflineRoleRecoveryDependencies;
+    await expect(runOfflineRoleRecovery(args(f.dbPath), hooked)).rejects.toThrow('validated database was unlinked');
+  });
+
+  it('checks stopped state before open, immediately before revoke, and after read-back', async () => {
+    const f = fixture();
+    let checks = 0;
+    f.deps.assertServiceStopped = vi.fn(async () => {
+      checks += 1;
+    });
+    await runOfflineRoleRecovery(args(f.dbPath), f.deps);
+    expect(checks).toBe(3);
+  });
+
+  it.each([2, 3])('does not report success when service check %i observes active', async (activeAt) => {
+    const f = fixture();
+    let checks = 0;
+    f.deps.assertServiceStopped = vi.fn(async () => {
+      checks += 1;
+      if (checks === activeAt) throw new Error('NanoClaw service is active');
+    });
+    await expect(runOfflineRoleRecovery(args(f.dbPath), f.deps)).rejects.toThrow('service is active');
+    const db = new Database(f.dbPath, { readonly: true });
+    expect(db.prepare('SELECT count(*) AS n FROM user_roles').get()).toEqual({ n: activeAt === 2 ? 1 : 0 });
+    db.close();
   });
 });

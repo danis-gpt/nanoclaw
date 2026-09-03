@@ -41,10 +41,54 @@ function findEsbuild() {
 }
 
 function copyPackage(packageJson, packageName, recoveryRoot) {
+  assertNoSymlinkOrSpecialTree(path.dirname(packageJson));
   fs.cpSync(path.dirname(packageJson), path.join(recoveryRoot, 'node_modules', packageName), {
     recursive: true,
     dereference: true,
   });
+}
+
+function assertNoSymlinkOrSpecialTree(root) {
+  const stat = fs.lstatSync(root);
+  if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile())) {
+    throw new Error(`unsafe dependency package input: ${root}`);
+  }
+  if (stat.isDirectory()) {
+    for (const name of fs.readdirSync(root).sort()) assertNoSymlinkOrSpecialTree(path.join(root, name));
+  }
+}
+
+function assertSafeRegularTree(root) {
+  const visit = (entry) => {
+    const stat = fs.lstatSync(entry);
+    if (stat.isSymbolicLink()) throw new Error(`unsafe symlink in package input: ${entry}`);
+    if (stat.isDirectory()) {
+      for (const name of fs.readdirSync(entry).sort()) visit(path.join(entry, name));
+      return;
+    }
+    if (!stat.isFile() || stat.nlink !== 1) throw new Error(`unsafe non-regular or hardlinked package input: ${entry}`);
+  };
+  visit(root);
+}
+
+function writeArtifactManifest(root, sourceCommit, sourceTree) {
+  const files = {};
+  const visit = (entry, relative = '') => {
+    for (const name of fs.readdirSync(entry).sort()) {
+      const child = path.join(entry, name);
+      const childRelative = relative ? `${relative}/${name}` : name;
+      const stat = fs.lstatSync(child);
+      if (stat.isDirectory()) visit(child, childRelative);
+      else if (stat.isFile()) files[childRelative] = sha256(child);
+      else throw new Error(`unsafe artifact entry: ${childRelative}`);
+    }
+  };
+  visit(root);
+  fs.writeFileSync(
+    path.join(root, 'artifact-manifest.json'),
+    `${JSON.stringify({ version: 1, source_commit: sourceCommit, source_tree: sourceTree, files }, null, 2)}\n`,
+    { mode: 0o644 },
+  );
 }
 
 function deterministicTar(sourceParent, sourceName, output, epoch) {
@@ -56,7 +100,7 @@ function deterministicTar(sourceParent, sourceName, output, epoch) {
       '--owner=0',
       '--group=0',
       '--numeric-owner',
-      '--format=gnu',
+      '--format=ustar',
       '--mode=u+rwX,go=rX',
       '-cf',
       output,
@@ -98,10 +142,6 @@ export function packageArtha17Release({ repo, artifactDir, includeRuntimeDepende
   if (dirty !== '') throw new Error(`packaging requires a clean source commit; dirty paths:\n${dirty}`);
   assertProtectedExternalDirectory(exactRepo, artifactDir);
 
-  const distDir = path.join(exactRepo, 'dist');
-  if (!fs.existsSync(distDir) || !fs.statSync(distDir).isDirectory()) {
-    throw new Error('complete built dist directory is required before packaging');
-  }
   const sourceCommit = command('/usr/bin/git', ['rev-parse', 'HEAD^{commit}'], exactRepo);
   const sourceTree = command('/usr/bin/git', ['rev-parse', 'HEAD^{tree}'], exactRepo);
   const epoch = command('/usr/bin/git', ['show', '-s', '--format=%ct', sourceCommit], exactRepo);
@@ -116,19 +156,62 @@ export function packageArtha17Release({ repo, artifactDir, includeRuntimeDepende
   const distTemp = path.join(artifactDir, `.dist-${process.pid}-${Date.now()}.tmp`);
   const recoveryTemp = path.join(artifactDir, `.recovery-${process.pid}-${Date.now()}.tmp`);
   try {
+    const sourceArchive = path.join(stage, 'source.tar');
+    const sourceRoot = path.join(stage, 'source');
+    fs.mkdirSync(sourceRoot, { mode: 0o700 });
+    const unsafeTrackedEntries = command('/usr/bin/git', ['ls-tree', '-r', sourceCommit], exactRepo)
+      .split('\n')
+      .filter((line) => line && !line.startsWith('100644 ') && !line.startsWith('100755 '));
+    if (unsafeTrackedEntries.length > 0)
+      throw new Error('source commit contains non-regular entries and cannot be packaged safely');
+    execFileSync('/usr/bin/git', ['archive', '--format=tar', `--output=${sourceArchive}`, sourceCommit], {
+      cwd: exactRepo,
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    execFileSync('/usr/bin/tar', ['-xf', sourceArchive, '-C', sourceRoot], { stdio: ['ignore', 'ignore', 'pipe'] });
+    fs.unlinkSync(sourceArchive);
+    const sourceModules = path.join(sourceRoot, 'node_modules');
+    fs.symlinkSync(path.join(exactRepo, 'node_modules'), sourceModules, 'dir');
+    try {
+      execFileSync('/usr/local/bin/pnpm', ['run', 'build'], {
+        cwd: sourceRoot,
+        stdio: ['ignore', 'ignore', 'pipe'],
+        env: { ...process.env, HUSKY: '0' },
+      });
+    } finally {
+      fs.unlinkSync(sourceModules);
+    }
+    const freshDist = path.join(sourceRoot, 'dist');
+    if (!fs.existsSync(freshDist) || !fs.statSync(freshDist).isDirectory()) {
+      throw new Error('clean source build did not produce a complete dist directory');
+    }
+    assertSafeRegularTree(freshDist);
+
+    const distRoot = path.join(stage, 'release');
+    fs.mkdirSync(distRoot, { mode: 0o700 });
+    fs.cpSync(freshDist, path.join(distRoot, 'dist'), { recursive: true });
+    fs.writeFileSync(
+      path.join(distRoot, 'package.json'),
+      `${JSON.stringify({ private: true, type: 'module' }, null, 2)}\n`,
+    );
+
     const recoveryRoot = path.join(stage, 'recovery');
     fs.mkdirSync(recoveryRoot, { mode: 0o700 });
     const recoveryEntry = path.join(recoveryRoot, 'offline-role-recovery.mjs');
-    execFileSync(findEsbuild(), [
-      path.join(exactRepo, 'src', 'cli', 'offline-role-recovery.ts'),
-      '--bundle',
-      '--platform=node',
-      '--format=esm',
-      '--target=node22',
-      '--tree-shaking=true',
-      '--external:better-sqlite3',
-      `--outfile=${recoveryEntry}`,
-    ]);
+    execFileSync(
+      findEsbuild(),
+      [
+        'src/cli/offline-role-recovery.ts',
+        '--bundle',
+        '--platform=node',
+        '--format=esm',
+        '--target=node22',
+        '--tree-shaking=true',
+        '--external:better-sqlite3',
+        `--outfile=${recoveryEntry}`,
+      ],
+      { cwd: sourceRoot },
+    );
     fs.chmodSync(recoveryEntry, 0o755);
     fs.writeFileSync(
       path.join(recoveryRoot, 'package.json'),
@@ -145,14 +228,22 @@ export function packageArtha17Release({ repo, artifactDir, includeRuntimeDepende
       copyPackage(betterSqlitePackage, 'better-sqlite3', recoveryRoot);
       copyPackage(bindingsPackage, 'bindings', recoveryRoot);
       copyPackage(fileUriPackage, 'file-uri-to-path', recoveryRoot);
+      copyPackage(betterSqlitePackage, 'better-sqlite3', distRoot);
+      copyPackage(bindingsPackage, 'bindings', distRoot);
+      copyPackage(fileUriPackage, 'file-uri-to-path', distRoot);
     }
+
+    writeArtifactManifest(distRoot, sourceCommit, sourceTree);
+    writeArtifactManifest(recoveryRoot, sourceCommit, sourceTree);
+    assertSafeRegularTree(distRoot);
+    assertSafeRegularTree(recoveryRoot);
 
     const builtRecovery = fs.readFileSync(recoveryEntry, 'utf8');
     if (/\bgrantRole\b|roles[ -]grant|--grant/u.test(builtRecovery)) {
       throw new Error('offline recovery bundle contains a reachable grant surface');
     }
 
-    deterministicTar(exactRepo, 'dist', distTemp, epoch);
+    deterministicTar(stage, 'release', distTemp, epoch);
     deterministicTar(stage, 'recovery', recoveryTemp, epoch);
     let distPublished = false;
     try {

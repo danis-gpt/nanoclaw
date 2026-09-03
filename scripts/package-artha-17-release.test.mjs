@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 
 import { packageArtha17Release } from './package-artha-17-release.mjs';
+import { extractSafeTar } from './smoke-artha-17-built-host.mjs';
 
 const roots = [];
 
@@ -16,13 +17,22 @@ function fixture() {
   const repo = path.join(root, 'repo');
   fs.mkdirSync(path.join(repo, 'dist'), { recursive: true });
   fs.mkdirSync(path.join(repo, 'src', 'cli'), { recursive: true });
-  fs.writeFileSync(path.join(repo, 'dist', 'z.js'), 'export const z = 1;\n');
-  fs.writeFileSync(path.join(repo, 'dist', 'a.js'), 'export const a = 1;\n');
+  fs.writeFileSync(path.join(repo, 'dist', 'tampered.js'), 'throw new Error("STALE_REPO_DIST");\n');
+  fs.writeFileSync(path.join(repo, 'src', 'a.js'), 'export const a = 1;\n');
+  fs.writeFileSync(path.join(repo, 'src', 'z.js'), 'export const z = 1;\n');
+  fs.writeFileSync(
+    path.join(repo, 'build.mjs'),
+    "import fs from 'node:fs'; fs.rmSync('dist',{recursive:true,force:true}); fs.mkdirSync('dist'); for (const n of ['a.js','z.js']) fs.copyFileSync('src/'+n,'dist/'+n);\n",
+  );
+  fs.writeFileSync(
+    path.join(repo, 'package.json'),
+    `${JSON.stringify({ private: true, type: 'module', scripts: { build: 'node build.mjs' } }, null, 2)}\n`,
+  );
   fs.writeFileSync(
     path.join(repo, 'src', 'cli', 'offline-role-recovery.ts'),
     "import Database from 'better-sqlite3'; export async function runOfflineRoleRecovery(argv: string[]) { if (argv[0] !== 'revoke') throw new Error('only revoke'); const db = new Database(':memory:'); db.close(); return {revoked:true}; }\n",
   );
-  fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules\n');
+  fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules\ndist\n');
   fs.symlinkSync(path.join(process.cwd(), 'node_modules'), path.join(repo, 'node_modules'), 'dir');
   execFileSync('/usr/bin/git', ['init', '-q'], { cwd: repo });
   execFileSync('/usr/bin/git', ['config', 'user.email', 'test@example.invalid'], { cwd: repo });
@@ -62,7 +72,10 @@ test('packages deterministic sorted dist and standalone revoke-only bundle bound
   assert.equal(fs.readFileSync(first.recovery.path).compare(fs.readFileSync(second.recovery.path)), 0);
 
   const distList = execFileSync('/usr/bin/tar', ['-tf', first.dist.path], { encoding: 'utf8' }).trim().split('\n');
-  assert.deepEqual(distList, ['dist/', 'dist/a.js', 'dist/z.js']);
+  assert.ok(distList.includes('release/dist/a.js'));
+  assert.ok(distList.includes('release/dist/z.js'));
+  assert.ok(distList.includes('release/artifact-manifest.json'));
+  assert.ok(!distList.some((entry) => entry.includes('tampered.js')));
   const recoveryList = execFileSync('/usr/bin/tar', ['-tf', first.recovery.path], { encoding: 'utf8' });
   assert.match(recoveryList, /offline-role-recovery\.mjs/);
   assert.doesNotMatch(recoveryList, /dist\//);
@@ -78,7 +91,7 @@ test('packages deterministic sorted dist and standalone revoke-only bundle bound
   await assert.doesNotReject(recovery.runOfflineRoleRecovery(['revoke']));
 });
 
-test('fails closed on dirty source, in-repo output, weak artifact mode, missing dist, and overwrite', () => {
+test('fails closed on dirty source, in-repo output, weak artifact mode, and overwrite', () => {
   const f = fixture();
   fs.writeFileSync(path.join(f.repo, 'dirty'), 'x');
   assert.throws(
@@ -99,23 +112,59 @@ test('fails closed on dirty source, in-repo output, weak artifact mode, missing 
   );
   fs.chmodSync(f.artifacts1, 0o700);
 
-  const missing = fixture();
-  fs.rmSync(path.join(missing.repo, 'dist'), { recursive: true });
-  execFileSync('/usr/bin/git', ['add', '-u'], { cwd: missing.repo });
-  execFileSync('/usr/bin/git', ['commit', '-qm', 'remove dist'], { cwd: missing.repo });
-  assert.throws(
-    () =>
-      packageArtha17Release({
-        repo: missing.repo,
-        artifactDir: missing.artifacts1,
-        includeRuntimeDependencies: false,
-      }),
-    /dist directory/,
-  );
-
   packageArtha17Release({ repo: f.repo, artifactDir: f.artifacts1, includeRuntimeDependencies: false });
   assert.throws(
     () => packageArtha17Release({ repo: f.repo, artifactDir: f.artifacts1, includeRuntimeDependencies: false }),
     /refusing to overwrite/,
   );
+});
+
+test('rejects a tracked source symlink before running the build', () => {
+  const f = fixture();
+  fs.symlinkSync('src/a.js', path.join(f.repo, 'linked-source.js'));
+  execFileSync('/usr/bin/git', ['add', 'linked-source.js'], { cwd: f.repo });
+  execFileSync('/usr/bin/git', ['commit', '-qm', 'unsafe symlink'], { cwd: f.repo });
+  assert.throws(
+    () => packageArtha17Release({ repo: f.repo, artifactDir: f.artifacts1, includeRuntimeDependencies: false }),
+    /source commit contains non-regular entries/,
+  );
+});
+
+test('rejects hardlinked files emitted by the controlled build', () => {
+  const f = fixture();
+  fs.writeFileSync(
+    path.join(f.repo, 'build.mjs'),
+    "import fs from 'node:fs'; fs.rmSync('dist',{recursive:true,force:true}); fs.mkdirSync('dist'); fs.copyFileSync('src/a.js','dist/a.js'); fs.linkSync('dist/a.js','dist/z.js');\n",
+  );
+  execFileSync('/usr/bin/git', ['add', 'build.mjs'], { cwd: f.repo });
+  execFileSync('/usr/bin/git', ['commit', '-qm', 'unsafe hardlink build'], { cwd: f.repo });
+  assert.throws(
+    () => packageArtha17Release({ repo: f.repo, artifactDir: f.artifacts1, includeRuntimeDependencies: false }),
+    /hardlinked package input/,
+  );
+});
+
+test('smoke extraction rejects symlink, hardlink, and duplicate archive entries', () => {
+  const f = fixture();
+  const payload = path.join(f.root, 'payload');
+  fs.mkdirSync(payload);
+  fs.writeFileSync(path.join(payload, 'file'), 'safe');
+
+  fs.symlinkSync('file', path.join(payload, 'link'));
+  const symlinkTar = path.join(f.root, 'symlink.tar');
+  execFileSync('/usr/bin/tar', ['--format=ustar', '-cf', symlinkTar, '-C', payload, 'link']);
+  fs.mkdirSync(path.join(f.root, 'extract-symlink'));
+  assert.throws(() => extractSafeTar(symlinkTar, path.join(f.root, 'extract-symlink')), /unsafe archive entry type/);
+  fs.unlinkSync(path.join(payload, 'link'));
+
+  fs.linkSync(path.join(payload, 'file'), path.join(payload, 'hard'));
+  const hardlinkTar = path.join(f.root, 'hardlink.tar');
+  execFileSync('/usr/bin/tar', ['--format=ustar', '-cf', hardlinkTar, '-C', payload, 'file', 'hard']);
+  fs.mkdirSync(path.join(f.root, 'extract-hardlink'));
+  assert.throws(() => extractSafeTar(hardlinkTar, path.join(f.root, 'extract-hardlink')), /unsafe archive entry type/);
+
+  const duplicateTar = path.join(f.root, 'duplicate.tar');
+  execFileSync('/usr/bin/tar', ['--format=ustar', '-cf', duplicateTar, '-C', payload, 'file', 'file']);
+  fs.mkdirSync(path.join(f.root, 'extract-duplicate'));
+  assert.throws(() => extractSafeTar(duplicateTar, path.join(f.root, 'extract-duplicate')), /duplicate archive entry/);
 });

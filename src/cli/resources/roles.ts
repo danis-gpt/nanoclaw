@@ -1,4 +1,4 @@
-import { grantRole, revokeRole } from '../../modules/permissions/db/user-roles.js';
+import { getUserRoles, grantRole, revokeRole } from '../../modules/permissions/db/user-roles.js';
 import type { UserRoleKind } from '../../types.js';
 import { registerResource } from '../crud.js';
 
@@ -13,6 +13,10 @@ function roleScope(role: UserRoleKind, groupId: string | null): string | null {
     throw new Error(`${role} role requires --group scope`);
   }
   return groupId;
+}
+
+async function hasExactRole(userId: string, role: UserRoleKind, groupId: string | null): Promise<boolean> {
+  return (await getUserRoles(userId)).some((row) => row.role === role && row.agent_group_id === groupId);
 }
 
 registerResource({
@@ -57,13 +61,15 @@ registerResource({
         const role = args.role as UserRoleKind;
         const groupId = roleScope(role, (args.group as string) ?? null);
         const grantedBy = (args.granted_by as string) ?? null;
-        await grantRole({
-          user_id: userId,
-          role,
-          agent_group_id: groupId,
-          granted_by: grantedBy,
-          granted_at: new Date().toISOString(),
-        });
+        if (!(await hasExactRole(userId, role, groupId))) {
+          await grantRole({
+            user_id: userId,
+            role,
+            agent_group_id: groupId,
+            granted_by: grantedBy,
+            granted_at: new Date().toISOString(),
+          });
+        }
         return { user_id: userId, role, agent_group_id: groupId };
       },
     },
@@ -80,7 +86,13 @@ registerResource({
         if (userId.length === 0) throw new Error('--user must not be empty');
         const role = args.role as UserRoleKind;
         const groupId = roleScope(role, (args.group as string) ?? null);
+        if (!(await hasExactRole(userId, role, groupId))) {
+          throw new Error('exact role grant does not exist');
+        }
         await revokeRole(userId, role, groupId);
+        if (await hasExactRole(userId, role, groupId)) {
+          throw new Error('exact role grant remains after revoke');
+        }
         return { revoked: { user_id: userId, role, agent_group_id: groupId } };
       },
     },
