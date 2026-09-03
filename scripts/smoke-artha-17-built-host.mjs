@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
+import net from 'node:net';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
@@ -119,7 +120,7 @@ function verifyArtifactManifest(root) {
     }
   };
   visit(root);
-  assert.deepEqual(actual, Object.keys(manifest.files).sort(), 'artifact manifest must name the exact file set');
+  assert.deepEqual(actual.sort(), Object.keys(manifest.files).sort(), 'artifact manifest must name the exact file set');
   for (const [relative, expected] of Object.entries(manifest.files)) {
     assert.equal(safeArchivePath(relative), relative);
     assert.match(expected, /^[0-9a-f]{64}$/u);
@@ -134,8 +135,20 @@ function safeFixtureRoot() {
   if (!homeStat.isDirectory() || homeStat.uid !== process.geteuid() || (homeStat.mode & 0o022) !== 0)
     throw new Error('home must be an euid-owned directory not writable by group/other');
   const base = path.join(home, '.nanoclaw-built-smoke-fixtures');
-  fs.mkdirSync(base, { mode: 0o700 });
-  fs.chmodSync(base, 0o700);
+  try {
+    fs.mkdirSync(base, { mode: 0o700 });
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error;
+  }
+  const baseStat = fs.lstatSync(base);
+  if (
+    !baseStat.isDirectory() ||
+    baseStat.isSymbolicLink() ||
+    baseStat.uid !== process.geteuid() ||
+    (baseStat.mode & 0o777) !== 0o700 ||
+    fs.realpathSync(base) !== base
+  )
+    throw new Error('smoke fixture base must remain a physical euid-owned mode-0700 directory');
   return fs.mkdtempSync(path.join(base, 'artha-17-'));
 }
 
@@ -145,6 +158,51 @@ function createRoleDb(Database, dbPath) {
     'CREATE TABLE user_roles (user_id TEXT NOT NULL, role TEXT NOT NULL, agent_group_id TEXT, granted_by TEXT, granted_at TEXT NOT NULL)',
   );
   db.close();
+}
+
+async function startFixtureSocketServer(socketPath, lookup) {
+  const server = net.createServer((connection) => {
+    let buffer = '';
+    connection.on('data', (chunk) => {
+      buffer += chunk.toString('utf8');
+      const newline = buffer.indexOf('\n');
+      if (newline < 0) return;
+      const request = JSON.parse(buffer.slice(0, newline));
+      let command = lookup(request.command);
+      if (!command) {
+        let shortened = request.command;
+        let split;
+        while ((split = shortened.lastIndexOf('-')) > 0) {
+          shortened = shortened.slice(0, split);
+          command = lookup(shortened);
+          if (command) {
+            request.args = { ...request.args, id: request.args.id ?? request.command.slice(shortened.length + 1) };
+            break;
+          }
+        }
+      }
+      Promise.resolve()
+        .then(async () => {
+          if (!command) throw new Error(`unknown fixture command ${request.command}`);
+          const data = await command.handler(command.parseArgs(request.args), { caller: 'host' });
+          connection.end(`${JSON.stringify({ id: request.id, ok: true, data })}\n`);
+        })
+        .catch((error) =>
+          connection.end(
+            `${JSON.stringify({ id: request.id, ok: false, error: { code: 'handler-error', message: error.message } })}\n`,
+          ),
+        );
+    });
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(socketPath, resolve);
+  });
+  fs.chmodSync(socketPath, 0o600);
+  return async () => {
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    if (fs.existsSync(socketPath)) fs.unlinkSync(socketPath);
+  };
 }
 
 async function smoke({ distBundle, recoveryBundle }) {
@@ -169,13 +227,15 @@ async function smoke({ distBundle, recoveryBundle }) {
     normalSeed.close();
     const connection = await import(dist('db/connection.js'));
     connection.initDb(normalDb);
-    let cliServer;
+    let stopFixtureServer;
     const socketPath = path.join(fixtureRoot, 'data', 'ncl.sock');
     try {
-      await import(dist('cli/commands/index.js'));
-      cliServer = await import(dist('cli/socket-server.js'));
+      await import(dist('cli/resources/roles.js'));
+      const help = await import(dist('cli/commands/help.js'));
+      help.registerResourceHelpCommands();
+      const registry = await import(dist('cli/registry.js'));
       fs.mkdirSync(path.dirname(socketPath), { mode: 0o700 });
-      await cliServer.startCliServer(socketPath);
+      stopFixtureServer = await startFixtureSocketServer(socketPath, registry.lookup);
       const socketStat = fs.lstatSync(socketPath);
       assert.equal(socketStat.uid, process.geteuid());
       assert.equal(socketStat.mode & 0o777, 0o600);
@@ -192,7 +252,7 @@ async function smoke({ distBundle, recoveryBundle }) {
         { role: 'technical_approver' },
       ]);
     } finally {
-      await cliServer?.stopCliServer();
+      await stopFixtureServer?.();
       connection.closeDb();
     }
     assert.equal(fs.existsSync(socketPath), false, 'Unix socket must be removed after server stop');
