@@ -17,6 +17,7 @@ function approval(payload: Record<string, unknown>): PendingApproval {
     agent_group_id: null,
     channel_type: null,
     platform_id: null,
+    instance: null,
     platform_message_id: null,
     expires_at: '2999-01-01T00:00:00.000Z',
     status: 'pending',
@@ -27,69 +28,76 @@ function approval(payload: Record<string, unknown>): PendingApproval {
   };
 }
 
-beforeEach(() => {
-  const db = initTestDb();
-  runMigrations(db);
-});
+beforeEach(async () => runMigrations(await initTestDb()));
 
-afterEach(() => closeDb());
+afterEach(async () => closeDb());
 
 describe('ideaFeatureMutation', () => {
-  it('holds a fresh mutation and accepts only a live, payload-bound grant', () => {
+  it('holds a fresh mutation and accepts only a live, payload-bound grant', async () => {
     const payload = { action: 'idea_feature_request', payload: { request: { b: 2, a: 1 } } };
     const row = approval({ payload: { request: { a: 1, b: 2 } }, action: 'idea_feature_request' });
-    createPendingApproval(row);
+    await createPendingApproval(row);
 
     expect(
-      guard(ideaFeatureMutation, {
-        actor: { kind: 'agent', agentGroupId: 'ag-product' },
-        payload,
-        grant: null,
-      }).effect,
+      (
+        await guard(ideaFeatureMutation, {
+          actor: { kind: 'agent', agentGroupId: 'ag-product' },
+          payload,
+          grant: null,
+        })
+      ).effect,
     ).toBe('hold');
     expect(
-      guard(ideaFeatureMutation, {
-        actor: { kind: 'agent', agentGroupId: 'ag-product' },
-        payload,
-        grant: row,
-      }).effect,
+      (
+        await guard(ideaFeatureMutation, {
+          actor: { kind: 'agent', agentGroupId: 'ag-product' },
+          payload,
+          grant: row,
+        })
+      ).effect,
     ).toBe('allow');
 
-    deletePendingApproval(row.approval_id);
+    await deletePendingApproval(row.approval_id);
     expect(
-      guard(ideaFeatureMutation, {
-        actor: { kind: 'agent', agentGroupId: 'ag-product' },
-        payload,
-        grant: row,
-      }).effect,
+      (
+        await guard(ideaFeatureMutation, {
+          actor: { kind: 'agent', agentGroupId: 'ag-product' },
+          payload,
+          grant: row,
+        })
+      ).effect,
     ).toBe('deny');
   });
 
-  it('denies a grant for any changed nested value', () => {
+  it('denies a grant for any changed nested value', async () => {
     const held = { action: 'idea_feature_request', payload: { request: { title: 'One' } } };
     const row = approval(held);
-    createPendingApproval(row);
+    await createPendingApproval(row);
     const changed = { action: 'idea_feature_request', payload: { request: { title: 'Two' } } };
 
     expect(
-      guard(ideaFeatureMutation, {
-        actor: { kind: 'agent', agentGroupId: 'ag-product' },
-        payload: changed,
-        grant: row,
-      }).effect,
+      (
+        await guard(ideaFeatureMutation, {
+          actor: { kind: 'agent', agentGroupId: 'ag-product' },
+          payload: changed,
+          grant: row,
+        })
+      ).effect,
     ).toBe('deny');
   });
 
-  it('denies an expired Idea Feature grant', () => {
+  it('denies an expired Idea Feature grant', async () => {
     const payload = { action: 'idea_feature_request', payload: { request: { title: 'One' } } };
     const row = { ...approval(payload), expires_at: '2000-01-01T00:00:00.000Z' };
-    createPendingApproval(row);
+    await createPendingApproval(row);
     expect(
-      guard(ideaFeatureMutation, {
-        actor: { kind: 'agent', agentGroupId: 'ag-product' },
-        payload,
-        grant: row,
-      }).effect,
+      (
+        await guard(ideaFeatureMutation, {
+          actor: { kind: 'agent', agentGroupId: 'ag-product' },
+          payload,
+          grant: row,
+        })
+      ).effect,
     ).toBe('deny');
   });
 

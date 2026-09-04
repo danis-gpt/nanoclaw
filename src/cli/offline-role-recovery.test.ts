@@ -59,8 +59,8 @@ function args(dbPath: string, overrides: Record<string, string> = {}): string[] 
   return ['revoke', ...Object.entries(values).flatMap(([key, value]) => [`--${key}`, value])];
 }
 
-afterEach(() => {
-  closeDb();
+afterEach(async () => {
+  await closeDb();
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 

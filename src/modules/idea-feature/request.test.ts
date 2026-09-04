@@ -29,22 +29,27 @@ function validCreate(): Record<string, unknown> {
   };
 }
 
-beforeEach(() => {
-  const db = initTestDb();
-  runMigrations(db);
-  createAgentGroup({ id: 'ag-product', name: 'Product', folder: 'product', agent_provider: null, created_at: now() });
+beforeEach(async () => {
+  await runMigrations(await initTestDb());
+  await createAgentGroup({
+    id: 'ag-product',
+    name: 'Product',
+    folder: 'product',
+    agent_provider: null,
+    created_at: now(),
+  });
   for (const id of ['telegram:requester', 'telegram:mikhail', 'telegram:danis', 'telegram:second']) {
-    createUser({ id, kind: 'telegram', display_name: null, created_at: now() });
-    addMember({ user_id: id, agent_group_id: 'ag-product', added_by: null, added_at: now() });
+    await createUser({ id, kind: 'telegram', display_name: null, created_at: now() });
+    await addMember({ user_id: id, agent_group_id: 'ag-product', added_by: null, added_at: now() });
   }
-  grantRole({
+  await grantRole({
     user_id: 'telegram:mikhail',
     role: 'product_approver',
     agent_group_id: 'ag-product',
     granted_by: null,
     granted_at: now(),
   });
-  grantRole({
+  await grantRole({
     user_id: 'telegram:danis',
     role: 'technical_approver',
     agent_group_id: 'ag-product',
@@ -53,7 +58,7 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => closeDb());
+afterEach(async () => closeDb());
 
 describe('parseIdeaFeatureRequest', () => {
   it('accepts a bounded exact request envelope', () => {
@@ -106,7 +111,7 @@ describe('resolveApproverForRequest', () => {
   });
 
   it('blocks zero or multiple active configured domain approvers', async () => {
-    grantRole({
+    await grantRole({
       user_id: 'telegram:second',
       role: 'product_approver',
       agent_group_id: 'ag-product',

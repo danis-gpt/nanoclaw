@@ -286,9 +286,10 @@ export async function resolveApproverForRequest(
   if (operation === 'idea_record_technical_decision') requiredRole = 'technical_approver';
   if (!requiredRole) return { approverUserId: requesterUserId, requiredRole: null };
 
-  const holders = getScopedRoleHolders(requiredRole, agentGroupId).filter(
-    (row) => canAccessAgentGroup(row.user_id, agentGroupId).allowed,
-  );
+  const holders = [];
+  for (const row of await getScopedRoleHolders(requiredRole, agentGroupId)) {
+    if ((await canAccessAgentGroup(row.user_id, agentGroupId)).allowed) holders.push(row);
+  }
   if (holders.length !== 1) throw new Error(`request requires exactly one active ${requiredRole}`);
   return { approverUserId: holders[0].user_id, requiredRole };
 }
@@ -320,7 +321,7 @@ export async function validateAndBindIdeaFeatureRequest(
       throw new Error('request did not originate from the configured Product Agent group');
     }
     const parsed = parseIdeaFeatureRequest(content);
-    const verifiedActorUserId = verifySourceEvent(session, parsed.sourceEventId);
+    const verifiedActorUserId = await verifySourceEvent(session, parsed.sourceEventId);
     const route = await resolveApproverForRequest(parsed.operation, verifiedActorUserId, session.agent_group_id);
     const binding: HostBinding = { verifiedActorUserId, ...route };
     content._host = binding;
@@ -330,7 +331,10 @@ export async function validateAndBindIdeaFeatureRequest(
     return true;
     // eslint-disable-next-line no-catch-all/no-catch-all -- the host validation boundary denies and safely reports all invalid requests
   } catch (error) {
-    notifyAgent(session, `idea_feature_request denied: ${error instanceof Error ? error.message : 'invalid request'}.`);
+    await notifyAgent(
+      session,
+      `idea_feature_request denied: ${error instanceof Error ? error.message : 'invalid request'}.`,
+    );
     return false;
   }
 }
@@ -338,9 +342,9 @@ export async function validateAndBindIdeaFeatureRequest(
 export async function requestIdeaFeatureHold(content: Record<string, unknown>, session: Session): Promise<void> {
   const parsed = parseIdeaFeatureRequest(content);
   const binding = plainRecord(content._host, '_host') as unknown as HostBinding;
-  const agent = getAgentGroup(session.agent_group_id);
+  const agent = await getAgentGroup(session.agent_group_id);
   if (!agent) {
-    notifyAgent(session, 'idea_feature_request denied: agent group not found.');
+    await notifyAgent(session, 'idea_feature_request denied: agent group not found.');
     return;
   }
   await requestApproval({

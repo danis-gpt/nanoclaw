@@ -15,8 +15,10 @@ import { parseIdeaFeatureRequest, type HostBinding } from './request.js';
 
 interface ApplyDependencies {
   callConnector?: (request: PrivateActionRequest) => Promise<Record<string, unknown>>;
-  notify?: (session: Session, text: string) => void;
-  operationContext?: (session: Session) => { instance: string; platformId: string };
+  notify?: (session: Session, text: string) => void | Promise<void>;
+  operationContext?: (
+    session: Session,
+  ) => { instance: string; platformId: string } | Promise<{ instance: string; platformId: string }>;
   now?: () => string;
 }
 
@@ -31,9 +33,9 @@ export function operationKeyFor(
     .digest('hex');
 }
 
-function defaultOperationContext(session: Session): { instance: string; platformId: string } {
+async function defaultOperationContext(session: Session): Promise<{ instance: string; platformId: string }> {
   if (!session.messaging_group_id) throw new Error('Idea Feature action requires a channel session');
-  const group = getMessagingGroup(session.messaging_group_id);
+  const group = await getMessagingGroup(session.messaging_group_id);
   if (!group || group.channel_type !== 'telegram') throw new Error('Idea Feature action requires a Telegram session');
   return { instance: group.instance ?? group.channel_type, platformId: group.platform_id };
 }
@@ -56,20 +58,20 @@ function hostBinding(value: unknown, grant: PendingApproval): HostBinding {
   return binding as unknown as HostBinding;
 }
 
-function privatePayload(
+async function privatePayload(
   operation: PrivateActionName,
   request: Record<string, unknown>,
   binding: HostBinding,
   sourceEventId: string,
   decidedAt: string,
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   if (operation === 'idea_create') return { idea: request };
   if (operation !== 'idea_record_product_decision' && operation !== 'idea_record_technical_decision') return request;
 
   const kind = operation === 'idea_record_product_decision' ? 'product' : 'technical';
   const expectedRole = kind === 'product' ? 'product_approver' : 'technical_approver';
   if (binding.requiredRole !== expectedRole) throw new Error(`decision requires live ${expectedRole}`);
-  const user = getUser(binding.approverUserId);
+  const user = await getUser(binding.approverUserId);
   if (!user) throw new Error('verified decision actor no longer exists');
   return {
     task_id: request.task_id,
@@ -99,14 +101,14 @@ export async function applyIdeaFeatureMutation(
     throw new Error('Idea Feature mutation requires a live approval grant');
   const parsed = parseIdeaFeatureRequest(content);
   const binding = hostBinding(content._host, grant);
-  const context = (dependencies.operationContext ?? defaultOperationContext)(session);
+  const context = await (dependencies.operationContext ?? defaultOperationContext)(session);
   const connectorRequest: PrivateActionRequest = {
     name: parsed.operation,
     grantId: grant.approval_id,
     operationKey: operationKeyFor(context.instance, context.platformId, parsed.sourceEventId, parsed.operation),
     actorUserId: binding.approverUserId,
     sourceEventId: parsed.sourceEventId,
-    payload: privatePayload(
+    payload: await privatePayload(
       parsed.operation,
       parsed.request,
       binding,
@@ -117,10 +119,10 @@ export async function applyIdeaFeatureMutation(
   const notify = dependencies.notify ?? notifyAgent;
   try {
     const result = await (dependencies.callConnector ?? callPrivateConnector)(connectorRequest);
-    notify(session, `Idea → Feature result (${parsed.operation}): ${canonicalJson(result)}`);
+    await notify(session, `Idea → Feature result (${parsed.operation}): ${canonicalJson(result)}`);
   } catch (error) {
     if (error instanceof PendingVerificationError) {
-      notify(
+      await notify(
         session,
         `Idea → Feature ${parsed.operation} is pending verification; the connector may have applied it. Do not retry as a new operation.`,
       );

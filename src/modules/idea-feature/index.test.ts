@@ -45,11 +45,11 @@ const deliveryAdapter: ChannelDeliveryAdapter = {
   },
 };
 
-function seedUser(id: string, displayName: string): void {
-  createUser({ id, kind: 'telegram', display_name: displayName, created_at: now() });
-  addMember({ user_id: id, agent_group_id: AGENT_GROUP_ID, added_by: null, added_at: now() });
+async function seedUser(id: string, displayName: string): Promise<void> {
+  await createUser({ id, kind: 'telegram', display_name: displayName, created_at: now() });
+  await addMember({ user_id: id, agent_group_id: AGENT_GROUP_ID, added_by: null, added_at: now() });
   const handle = id.slice('telegram:'.length);
-  createMessagingGroup({
+  await createMessagingGroup({
     id: `dm-${handle}`,
     channel_type: 'telegram',
     platform_id: `telegram:${handle}`,
@@ -58,11 +58,11 @@ function seedUser(id: string, displayName: string): void {
     unknown_sender_policy: 'strict',
     created_at: now(),
   });
-  upsertUserDm({ user_id: id, channel_type: 'telegram', messaging_group_id: `dm-${handle}`, resolved_at: now() });
+  await upsertUserDm({ user_id: id, channel_type: 'telegram', messaging_group_id: `dm-${handle}`, resolved_at: now() });
 }
 
-function sourceEvent(): void {
-  writeSessionMessage(AGENT_GROUP_ID, session.id, {
+async function sourceEvent(): Promise<void> {
+  await writeSessionMessage(AGENT_GROUP_ID, session.id, {
     id: EVENT_ID,
     kind: 'chat-sdk',
     timestamp: now(),
@@ -134,11 +134,11 @@ async function startConnector(): Promise<void> {
 
 async function submit(
   content: Record<string, unknown>,
-): Promise<ReturnType<typeof getPendingApprovalsByAction>[number]> {
+): Promise<Awaited<ReturnType<typeof getPendingApprovalsByAction>>[number]> {
   const action = getDeliveryAction('idea_feature_request');
   expect(action).toBeDefined();
-  await action!(content, session, {} as never);
-  const rows = getPendingApprovalsByAction('idea_feature_request');
+  await action!(content, session);
+  const rows = await getPendingApprovalsByAction('idea_feature_request');
   expect(rows).toHaveLength(1);
   return rows[0];
 }
@@ -157,10 +157,15 @@ async function click(approvalId: string, rawUserId: string): Promise<boolean> {
 beforeEach(async () => {
   fs.rmSync(TEST_DIR, { recursive: true, force: true });
   fs.mkdirSync(TEST_DIR, { recursive: true });
-  const db = initTestDb();
-  runMigrations(db);
-  createAgentGroup({ id: AGENT_GROUP_ID, name: 'Product', folder: 'product', agent_provider: null, created_at: now() });
-  createMessagingGroup({
+  await runMigrations(await initTestDb());
+  await createAgentGroup({
+    id: AGENT_GROUP_ID,
+    name: 'Product',
+    folder: 'product',
+    agent_provider: null,
+    created_at: now(),
+  });
+  await createMessagingGroup({
     id: 'mg-product',
     channel_type: 'telegram',
     platform_id: 'telegram:-1000000000001',
@@ -180,25 +185,25 @@ beforeEach(async () => {
     last_active: now(),
     created_at: now(),
   };
-  createSession(session);
-  seedUser('telegram:119', 'Requester');
-  seedUser('telegram:mikhail', 'Mikhail');
-  seedUser('telegram:danis', 'Danis');
-  grantRole({
+  await createSession(session);
+  await seedUser('telegram:119', 'Requester');
+  await seedUser('telegram:mikhail', 'Mikhail');
+  await seedUser('telegram:danis', 'Danis');
+  await grantRole({
     user_id: 'telegram:mikhail',
     role: 'product_approver',
     agent_group_id: AGENT_GROUP_ID,
     granted_by: null,
     granted_at: now(),
   });
-  grantRole({
+  await grantRole({
     user_id: 'telegram:danis',
     role: 'technical_approver',
     agent_group_id: AGENT_GROUP_ID,
     granted_by: null,
     granted_at: now(),
   });
-  sourceEvent();
+  await sourceEvent();
   connectorCalls = [];
   server = null;
   socketDir = null;
@@ -212,7 +217,7 @@ afterEach(async () => {
   delete process.env.IDEA_FEATURE_PRODUCT_AGENT_GROUP_ID;
   if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
   if (socketDir) fs.rmSync(socketDir, { recursive: true, force: true });
-  closeDb();
+  await closeDb();
   fs.rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
@@ -223,11 +228,11 @@ describe('Idea Feature approval wiring', () => {
     expect(Date.parse(approval.expires_at ?? '')).toBeGreaterThan(Date.now());
 
     await expect(click(approval.approval_id, 'danis')).resolves.toBe(true);
-    expect(getPendingApproval(approval.approval_id)).toBeDefined();
+    expect(await getPendingApproval(approval.approval_id)).toBeDefined();
     expect(connectorCalls).toHaveLength(0);
 
     await expect(click(approval.approval_id, '119')).resolves.toBe(true);
-    expect(getPendingApproval(approval.approval_id)).toBeUndefined();
+    expect(await getPendingApproval(approval.approval_id)).toBeUndefined();
     expect(connectorCalls).toHaveLength(1);
 
     await expect(click(approval.approval_id, '119')).resolves.toBe(false);
@@ -252,10 +257,10 @@ describe('Idea Feature approval wiring', () => {
 
   it('denies live when the domain role is revoked between card and click', async () => {
     const approval = await submit(decisionContent('product'));
-    revokeRole('telegram:mikhail', 'product_approver', AGENT_GROUP_ID);
+    await revokeRole('telegram:mikhail', 'product_approver', AGENT_GROUP_ID);
 
     await click(approval.approval_id, 'mikhail');
-    expect(getPendingApproval(approval.approval_id)).toBeUndefined();
+    expect(await getPendingApproval(approval.approval_id)).toBeUndefined();
     expect(connectorCalls).toHaveLength(0);
   });
 });

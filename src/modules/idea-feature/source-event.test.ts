@@ -12,7 +12,7 @@ import { closeDb, initTestDb, runMigrations } from '../../db/index.js';
 import { createMessagingGroup } from '../../db/messaging-groups.js';
 import { createSession } from '../../db/sessions.js';
 import { writeSessionMessage } from '../../session-manager.js';
-import type { Session } from '../../types.js';
+import type { MessageInKind, Session } from '../../types.js';
 import { addMember } from '../permissions/db/agent-group-members.js';
 import { createUser } from '../permissions/db/users.js';
 import { verifySourceEvent } from './source-event.js';
@@ -24,7 +24,7 @@ function now(): string {
   return new Date().toISOString();
 }
 
-function seedSession(id: string, messagingGroupId: string | null = 'mg-product'): Session {
+async function seedSession(id: string, messagingGroupId: string | null = 'mg-product'): Promise<Session> {
   const session: Session = {
     id,
     agent_group_id: AGENT_GROUP_ID,
@@ -36,21 +36,21 @@ function seedSession(id: string, messagingGroupId: string | null = 'mg-product')
     last_active: now(),
     created_at: now(),
   };
-  createSession(session);
+  await createSession(session);
   return session;
 }
 
-function writeEvent(
+async function writeEvent(
   session: Session,
   id: string,
   overrides: Partial<{
-    kind: string;
+    kind: MessageInKind;
     channelType: string | null;
     platformId: string | null;
     content: Record<string, unknown>;
   }> = {},
-): void {
-  writeSessionMessage(session.agent_group_id, session.id, {
+): Promise<void> {
+  await writeSessionMessage(session.agent_group_id, session.id, {
     id,
     kind: overrides.kind ?? 'chat-sdk',
     timestamp: now(),
@@ -67,14 +67,19 @@ function writeEvent(
   });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
   fs.rmSync(TEST_DIR, { recursive: true, force: true });
   fs.mkdirSync(TEST_DIR, { recursive: true });
-  const db = initTestDb();
-  runMigrations(db);
-  createAgentGroup({ id: AGENT_GROUP_ID, name: 'Product', folder: 'product', agent_provider: null, created_at: now() });
-  createMessagingGroup({
+  await runMigrations(await initTestDb());
+  await createAgentGroup({
+    id: AGENT_GROUP_ID,
+    name: 'Product',
+    folder: 'product',
+    agent_provider: null,
+    created_at: now(),
+  });
+  await createMessagingGroup({
     id: 'mg-product',
     channel_type: 'telegram',
     platform_id: 'telegram:-1000000000001',
@@ -83,58 +88,58 @@ beforeEach(() => {
     unknown_sender_policy: 'strict',
     created_at: now(),
   });
-  createUser({ id: 'telegram:119', kind: 'telegram', display_name: 'Requester', created_at: now() });
-  addMember({ user_id: 'telegram:119', agent_group_id: AGENT_GROUP_ID, added_by: null, added_at: now() });
+  await createUser({ id: 'telegram:119', kind: 'telegram', display_name: 'Requester', created_at: now() });
+  await addMember({ user_id: 'telegram:119', agent_group_id: AGENT_GROUP_ID, added_by: null, added_at: now() });
 });
 
-afterEach(() => {
-  closeDb();
+afterEach(async () => {
+  await closeDb();
   fs.rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
 describe('verifySourceEvent', () => {
-  it('returns the namespaced user from the exact Telegram event in the requesting session', () => {
-    const session = seedSession('sess-product');
+  it('returns the namespaced user from the exact Telegram event in the requesting session', async () => {
+    const session = await seedSession('sess-product');
     const eventId = `-1000000000001:119:${AGENT_GROUP_ID}`;
-    writeEvent(session, eventId);
+    await writeEvent(session, eventId);
 
-    expect(verifySourceEvent(session, eventId)).toBe('telegram:119');
+    await expect(verifySourceEvent(session, eventId)).resolves.toBe('telegram:119');
   });
 
-  it('denies missing, altered, and cross-session event IDs', () => {
-    const session = seedSession('sess-product');
-    const other = seedSession('sess-other');
+  it('denies missing, altered, and cross-session event IDs', async () => {
+    const session = await seedSession('sess-product');
+    const other = await seedSession('sess-other');
     const eventId = `-1000000000001:119:${AGENT_GROUP_ID}`;
-    writeEvent(other, eventId);
+    await writeEvent(other, eventId);
 
-    expect(() => verifySourceEvent(session, eventId)).toThrow('source event not found');
-    expect(() => verifySourceEvent(other, `${eventId}-altered`)).toThrow('source event not found');
+    await expect(verifySourceEvent(session, eventId)).rejects.toThrow('source event not found');
+    await expect(verifySourceEvent(other, `${eventId}-altered`)).rejects.toThrow('source event not found');
   });
 
   it.each([
     ['scheduled task', { kind: 'task', channelType: 'telegram', content: { senderId: '119' } }],
     ['session echo', { kind: 'chat', channelType: 'agent', content: { senderId: 'system' } }],
     ['CLI message', { kind: 'chat', channelType: 'cli', content: { senderId: 'cli:admin' } }],
-  ])('denies a %s row', (_label, overrides) => {
-    const session = seedSession(`sess-${String(_label).replaceAll(' ', '-')}`);
+  ])('denies a %s row', async (_label, overrides) => {
+    const session = await seedSession(`sess-${String(_label).replaceAll(' ', '-')}`);
     const eventId = `event-${String(_label).replaceAll(' ', '-')}:${AGENT_GROUP_ID}`;
-    writeEvent(session, eventId, overrides);
-    expect(() => verifySourceEvent(session, eventId)).toThrow('source event is not a human Telegram message');
+    await writeEvent(session, eventId, overrides as Parameters<typeof writeEvent>[2]);
+    await expect(verifySourceEvent(session, eventId)).rejects.toThrow('source event is not a human Telegram message');
   });
 
-  it('denies inconsistent or model-like sender metadata', () => {
-    const session = seedSession('sess-product');
+  it('denies inconsistent or model-like sender metadata', async () => {
+    const session = await seedSession('sess-product');
     const eventId = `event-inconsistent:${AGENT_GROUP_ID}`;
-    writeEvent(session, eventId, { content: { senderId: '119', author: { userId: '999' } } });
-    expect(() => verifySourceEvent(session, eventId)).toThrow('source event sender metadata is inconsistent');
+    await writeEvent(session, eventId, { content: { senderId: '119', author: { userId: '999' } } });
+    await expect(verifySourceEvent(session, eventId)).rejects.toThrow('source event sender metadata is inconsistent');
   });
 
-  it('denies a Telegram sender who is not an active Product group member', () => {
-    const session = seedSession('sess-product');
-    createUser({ id: 'telegram:404', kind: 'telegram', display_name: null, created_at: now() });
+  it('denies a Telegram sender who is not an active Product group member', async () => {
+    const session = await seedSession('sess-product');
+    await createUser({ id: 'telegram:404', kind: 'telegram', display_name: null, created_at: now() });
     const eventId = `event-nonmember:${AGENT_GROUP_ID}`;
-    writeEvent(session, eventId, { content: { senderId: '404' } });
-    expect(() => verifySourceEvent(session, eventId)).toThrow(
+    await writeEvent(session, eventId, { content: { senderId: '404' } });
+    await expect(verifySourceEvent(session, eventId)).rejects.toThrow(
       'source event sender is not an active agent-group member',
     );
   });

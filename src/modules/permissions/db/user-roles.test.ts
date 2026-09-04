@@ -8,21 +8,26 @@ function now(): string {
   return new Date().toISOString();
 }
 
-beforeEach(() => {
-  const db = initTestDb();
-  runMigrations(db);
-  createAgentGroup({ id: 'ag-product', name: 'Product', folder: 'product', agent_provider: null, created_at: now() });
-  createAgentGroup({ id: 'ag-other', name: 'Other', folder: 'other', agent_provider: null, created_at: now() });
+beforeEach(async () => {
+  await runMigrations(await initTestDb());
+  await createAgentGroup({
+    id: 'ag-product',
+    name: 'Product',
+    folder: 'product',
+    agent_provider: null,
+    created_at: now(),
+  });
+  await createAgentGroup({ id: 'ag-other', name: 'Other', folder: 'other', agent_provider: null, created_at: now() });
   for (const id of ['telegram:mikhail', 'telegram:danis', 'telegram:owner', 'telegram:admin']) {
-    createUser({ id, kind: 'telegram', display_name: null, created_at: now() });
+    await createUser({ id, kind: 'telegram', display_name: null, created_at: now() });
   }
 });
 
-afterEach(() => closeDb());
+afterEach(async () => closeDb());
 
 describe('scoped Idea Feature roles', () => {
   it('matches the exact user, domain role, and agent group', async () => {
-    grantRole({
+    await grantRole({
       user_id: 'telegram:mikhail',
       role: 'product_approver',
       agent_group_id: 'ag-product',
@@ -37,8 +42,14 @@ describe('scoped Idea Feature roles', () => {
   });
 
   it('does not treat owner or admin as a domain approver', async () => {
-    grantRole({ user_id: 'telegram:owner', role: 'owner', agent_group_id: null, granted_by: null, granted_at: now() });
-    grantRole({
+    await grantRole({
+      user_id: 'telegram:owner',
+      role: 'owner',
+      agent_group_id: null,
+      granted_by: null,
+      granted_at: now(),
+    });
+    await grantRole({
       user_id: 'telegram:admin',
       role: 'admin',
       agent_group_id: 'ag-product',
@@ -50,8 +61,8 @@ describe('scoped Idea Feature roles', () => {
     await expect(hasScopedRole('telegram:admin', 'technical_approver', 'ag-product')).resolves.toBe(false);
   });
 
-  it('requires domain roles to be scoped and lists holders deterministically', () => {
-    expect(() =>
+  it('requires domain roles to be scoped and lists holders deterministically', async () => {
+    await expect(
       grantRole({
         user_id: 'telegram:mikhail',
         role: 'product_approver',
@@ -59,16 +70,16 @@ describe('scoped Idea Feature roles', () => {
         granted_by: null,
         granted_at: now(),
       }),
-    ).toThrow('domain approver role must be scoped');
+    ).rejects.toThrow('domain approver role must be scoped');
 
-    grantRole({
+    await grantRole({
       user_id: 'telegram:mikhail',
       role: 'product_approver',
       agent_group_id: 'ag-product',
       granted_by: null,
       granted_at: '2026-01-02T00:00:00.000Z',
     });
-    grantRole({
+    await grantRole({
       user_id: 'telegram:danis',
       role: 'product_approver',
       agent_group_id: 'ag-product',
@@ -76,7 +87,7 @@ describe('scoped Idea Feature roles', () => {
       granted_at: '2026-01-01T00:00:00.000Z',
     });
 
-    expect(getScopedRoleHolders('product_approver', 'ag-product').map((row) => row.user_id)).toEqual([
+    expect((await getScopedRoleHolders('product_approver', 'ag-product')).map((row) => row.user_id)).toEqual([
       'telegram:danis',
       'telegram:mikhail',
     ]);

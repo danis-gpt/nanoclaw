@@ -1,5 +1,6 @@
 import { getMessagingGroup } from '../../db/messaging-groups.js';
-import { openInboundDb } from '../../session-manager.js';
+import { inboundDbPath } from '../../mailbox/sqlite/paths.js';
+import { openInboundDb } from '../../mailbox/sqlite/session-db.js';
 import type { Session } from '../../types.js';
 import { canAccessAgentGroup } from '../permissions/access.js';
 import { getUser } from '../permissions/db/users.js';
@@ -53,7 +54,7 @@ function senderFromContent(raw: string): string {
  * Resolve a model-supplied event reference against the host-owned inbound DB.
  * The returned identity comes exclusively from immutable routed metadata.
  */
-export function verifySourceEvent(session: Session, sourceEventId: string): string {
+export async function verifySourceEvent(session: Session, sourceEventId: string): Promise<string> {
   if (
     typeof sourceEventId !== 'string' ||
     sourceEventId.length < 1 ||
@@ -65,14 +66,14 @@ export function verifySourceEvent(session: Session, sourceEventId: string): stri
   if (session.status !== 'active' || session.messaging_group_id === null || session.thread_id?.startsWith('system:')) {
     fail('requesting session is not an active channel session');
   }
-  const messagingGroup = getMessagingGroup(session.messaging_group_id);
+  const messagingGroup = await getMessagingGroup(session.messaging_group_id);
   if (!messagingGroup || messagingGroup.channel_type !== 'telegram') {
     fail('requesting session is not a Telegram session');
   }
 
   let db: ReturnType<typeof openInboundDb>;
   try {
-    db = openInboundDb(session.agent_group_id, session.id);
+    db = openInboundDb(inboundDbPath(session.agent_group_id, session.id));
     // eslint-disable-next-line no-catch-all/no-catch-all -- an absent/unopenable session DB is indistinguishable from a missing source event
   } catch {
     return fail('source event not found in requesting session');
@@ -100,8 +101,8 @@ export function verifySourceEvent(session: Session, sourceEventId: string): stri
   }
 
   const actorUserId = senderFromContent(row.content);
-  const user = getUser(actorUserId);
-  const access = canAccessAgentGroup(actorUserId, session.agent_group_id);
+  const user = await getUser(actorUserId);
+  const access = await canAccessAgentGroup(actorUserId, session.agent_group_id);
   if (!user || user.kind !== 'telegram' || !access.allowed) {
     fail('source event sender is not an active agent-group member');
   }

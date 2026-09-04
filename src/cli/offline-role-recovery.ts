@@ -170,16 +170,16 @@ export async function runOfflineRoleRecovery(
     if (!openedStat.isFile() || openedStat.uid !== dependencies.expectedUid || (openedStat.mode & 0o777) !== 0o600) {
       throw new Error('validated database identity changed before SQLite open');
     }
-    initDb(handles.fdPath);
-    const before = getUserRoles(request.targetUserId);
+    await initDb(handles.fdPath);
+    const before = await getUserRoles(request.targetUserId);
     const matching = before.filter(
       (row) =>
         row.user_id === request.expectedUserId && row.role === request.role && row.agent_group_id === request.group,
     );
     if (matching.length !== 1) throw new Error('recovery requires exactly one matching grant');
     await dependencies.assertServiceStopped();
-    revokeRole(request.targetUserId, request.role, request.group);
-    const after = getUserRoles(request.targetUserId);
+    await revokeRole(request.targetUserId, request.role, request.group);
+    const after = await getUserRoles(request.targetUserId);
     if (
       after.some(
         (row) =>
@@ -193,7 +193,7 @@ export async function runOfflineRoleRecovery(
       revoked: { user_id: request.targetUserId, role: request.role, agent_group_id: request.group },
     };
   } finally {
-    closeDb();
+    await closeDb();
     fs.closeSync(handles.fileFd);
     fs.closeSync(handles.directoryFd);
   }

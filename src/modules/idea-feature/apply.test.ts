@@ -29,6 +29,7 @@ function grant(): PendingApproval {
     agent_group_id: session.agent_group_id,
     channel_type: 'telegram',
     platform_id: 'telegram:119',
+    instance: 'telegram',
     platform_message_id: null,
     expires_at: null,
     status: 'pending',
@@ -60,10 +61,9 @@ function decisionContent(): Record<string, unknown> {
   };
 }
 
-beforeEach(() => {
-  const db = initTestDb();
-  runMigrations(db);
-  createUser({
+beforeEach(async () => {
+  await runMigrations(await initTestDb());
+  await createUser({
     id: 'telegram:mikhail',
     kind: 'telegram',
     display_name: 'Mikhail',
@@ -71,7 +71,7 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => closeDb());
+afterEach(async () => closeDb());
 
 describe('applyIdeaFeatureMutation', () => {
   it('sends the consumed approval, exclusive human actor, source event, and canonical decision payload', async () => {
@@ -82,7 +82,9 @@ describe('applyIdeaFeatureMutation', () => {
         call = request;
         return { idea_id: 'IDEA-1', state: 'Product Approved' };
       },
-      notify: (_session, text) => notices.push(text),
+      notify: (_session, text) => {
+        notices.push(text);
+      },
       operationContext: () => ({ instance: 'telegram', platformId: 'telegram:-1000000000001' }),
       now: () => '2026-01-02T03:04:05.000Z',
     });
@@ -115,10 +117,25 @@ describe('applyIdeaFeatureMutation', () => {
       callConnector: async () => {
         throw new PendingVerificationError();
       },
-      notify: (_session, text) => notices.push(text),
+      notify: (_session, text) => {
+        notices.push(text);
+      },
       operationContext: () => ({ instance: 'telegram', platformId: 'telegram:-1000000000001' }),
     });
     expect(notices).toEqual([expect.stringContaining('pending verification')]);
+  });
+
+  it('waits for the result notification before completing', async () => {
+    let notificationCompleted = false;
+    await applyIdeaFeatureMutation(decisionContent(), session, grant(), {
+      callConnector: async () => ({ applied: true }),
+      notify: async () => {
+        await Promise.resolve();
+        notificationCompleted = true;
+      },
+      operationContext: () => ({ instance: 'telegram', platformId: 'telegram:-1000000000001' }),
+    });
+    expect(notificationCompleted).toBe(true);
   });
 
   it('requires a live approval grant and derives stable operation keys', async () => {
