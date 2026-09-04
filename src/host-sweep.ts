@@ -29,7 +29,8 @@
 import type Database from 'better-sqlite3';
 import fs from 'fs';
 
-import { getActiveSessions } from './db/sessions.js';
+import { ensureEgressNetwork } from './egress-lockdown.js';
+import { getActiveSessions, isTaskThread, updateSession } from './db/sessions.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import {
   countDueMessages,
@@ -132,16 +133,50 @@ export function stopHostSweep(): void {
 async function sweep(): Promise<void> {
   if (!running) return;
 
+  // Re-heal the egress network so already-running agents keep their gateway hop
+  // if it was detached out-of-band. Best-effort here: a heal failure isn't a
+  // leak (agents stay on the internal net), so log and continue. No-op when
+  // lockdown is disabled.
+  try {
+    ensureEgressNetwork();
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
+  } catch (err) {
+    log.error('Egress lockdown re-heal failed', { err });
+  }
+
   try {
     const sessions = getActiveSessions();
     for (const session of sessions) {
       await sweepSession(session);
     }
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
   } catch (err) {
     log.error('Host sweep error', { err });
   }
 
+  // Finalize any "Reject with reason…" holds whose reply window elapsed (admin
+  // ghosted, or the host restarted mid-capture). Central-DB scan, once per tick
+  // — not per session.
+  // MODULE-HOOK:approvals-reason-sweep:start
+  try {
+    const { sweepAwaitingReasonRejects } = await import('./modules/approvals/index.js');
+    await sweepAwaitingReasonRejects();
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
+  } catch (err) {
+    log.error('Reject-with-reason sweep failed', { err });
+  }
+  // MODULE-HOOK:approvals-reason-sweep:end
+
   setTimeout(sweep, SWEEP_INTERVAL_MS);
+}
+
+/** A per-task session with no live tasks and no running container is spent → close it. */
+export function shouldCloseTaskSession(
+  threadId: string | null,
+  containerRunning: boolean,
+  liveTaskCount: number,
+): boolean {
+  return isTaskThread(threadId) && !containerRunning && liveTaskCount === 0;
 }
 
 async function sweepSession(session: Session): Promise<void> {
@@ -155,12 +190,14 @@ async function sweepSession(session: Session): Promise<void> {
   let outDb: Database.Database | null = null;
   try {
     inDb = openInboundDb(agentGroup.id, session.id);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
   } catch {
     return;
   }
 
   try {
     outDb = openOutboundDb(agentGroup.id, session.id);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
   } catch {
     // outbound.db might not exist yet (container hasn't started)
   }
@@ -178,17 +215,23 @@ async function sweepSession(session: Session): Promise<void> {
     // would keep bumping process_after into the future, dueCount would stay 0,
     // and the wake would never fire.
     const dueCount = countDueMessages(inDb);
+    let justWoke = false;
     if (dueCount > 0 && !isContainerRunning(session.id)) {
       log.info('Waking container for due messages', { sessionId: session.id, count: dueCount });
       // wakeContainer never throws — transient spawn failures (OneCLI down,
       // etc.) return false and leave messages pending for the next tick.
       await wakeContainer(session);
+      justWoke = true;
     }
 
     const alive = isContainerRunning(session.id);
 
     // 3. Running-container SLA: absolute ceiling + per-claim stuck rules.
-    if (alive && outDb) {
+    // Skip on the same iteration that just woke the container — it hasn't
+    // had a chance to clear stale processing_ack rows from a previous crash
+    // yet. Without this grace period, stale claims cause an immediate
+    // spawn-kill loop.
+    if (alive && outDb && !justWoke) {
       enforceRunningContainerSla(inDb, outDb, session, agentGroup.id);
     }
 
@@ -205,6 +248,24 @@ async function sweepSession(session: Session): Promise<void> {
     const { handleRecurrence } = await import('./modules/scheduling/recurrence.js');
     await handleRecurrence(inDb, session);
     // MODULE-HOOK:scheduling-recurrence:end
+
+    // 6. GC spent task sessions. An isolated per-task session with no live task
+    // rows left (one-shot fired, or all cancelled/deleted) and no container
+    // running is dead — close it so it stops being swept and listed. Runs after
+    // recurrence so a just-fired recurring series has already re-armed its next
+    // pending row and is never collected. The per-task log file in the workspace
+    // is the durable history and survives the close.
+    if (isTaskThread(session.thread_id)) {
+      const liveTasks = (
+        inDb
+          .prepare("SELECT COUNT(*) AS c FROM messages_in WHERE kind = 'task' AND status IN ('pending', 'paused')")
+          .get() as { c: number }
+      ).c;
+      if (shouldCloseTaskSession(session.thread_id, isContainerRunning(session.id), liveTasks)) {
+        updateSession(session.id, { status: 'closed' });
+        log.info('Closed spent task session', { sessionId: session.id, threadId: session.thread_id });
+      }
+    }
   } finally {
     inDb.close();
     outDb?.close();
@@ -215,6 +276,7 @@ function heartbeatMtimeMs(agentGroupId: string, sessionId: string): number {
   const hbPath = heartbeatPath(agentGroupId, sessionId);
   try {
     return fs.statSync(hbPath).mtimeMs;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
   } catch {
     return 0;
   }
@@ -320,6 +382,7 @@ function resetStuckProcessingRows(
     if (cleared > 0) {
       log.info('Cleared orphan processing claims', { sessionId: session.id, cleared, reason });
     }
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
   } catch (err) {
     log.warn('Failed to clear orphan processing claims', { sessionId: session.id, err });
   } finally {

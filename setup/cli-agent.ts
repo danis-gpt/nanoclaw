@@ -1,8 +1,8 @@
 /**
- * Step: cli-agent — Create the scratch CLI agent for `/new-setup`.
+ * Step: cli-agent — Create the scratch CLI agent for `/setup`.
  *
  * Thin wrapper around `scripts/init-cli-agent.ts`. Emits a status block so
- * /new-setup SKILL.md can parse the result without having to read the
+ * /setup SKILL.md can parse the result without having to read the
  * script's plain stdout.
  *
  * Args:
@@ -68,8 +68,12 @@ export async function run(args: string[]): Promise<void> {
 
   log.info('Invoking init-cli-agent', { displayName, agentName });
 
+  // Provider-agnostic: init-cli-agent creates a default group and emits its id.
+  // Surface that id so the orchestrator can set the picked provider on it (via
+  // ncl) before the ping — provider is a DB property, never a creation flag.
+  let stdout = '';
   try {
-    execFileSync('pnpm', scriptArgs, {
+    stdout = execFileSync('pnpm', scriptArgs, {
       cwd: projectRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
       encoding: 'utf-8',
@@ -90,10 +94,13 @@ export async function run(args: string[]): Promise<void> {
     process.exit(1);
   }
 
+  const agentGroupId = stdout.match(/^AGENT_GROUP_ID:\s*(\S+)/m)?.[1];
+
   emitStatus('CLI_AGENT', {
     DISPLAY_NAME: displayName,
     AGENT_NAME: agentName || displayName,
     CHANNEL: 'cli/local',
+    ...(agentGroupId ? { AGENT_GROUP_ID: agentGroupId } : {}),
     STATUS: 'success',
     LOG: 'logs/setup.log',
   });

@@ -6,6 +6,7 @@ import { touchHeartbeat } from '../db/connection.js';
 
 const SCRIPT_TIMEOUT_MS = 30_000;
 const SCRIPT_MAX_BUFFER = 1024 * 1024;
+const AGENT_WORKSPACE = '/workspace/agent';
 
 export interface ScriptResult {
   wakeAgent: boolean;
@@ -16,7 +17,11 @@ function log(msg: string): void {
   console.error(`[task-script] ${msg}`);
 }
 
-export async function runScript(script: string, taskId: string): Promise<ScriptResult | null> {
+export async function runScript(
+  script: string,
+  taskId: string,
+  workingDirectory: string = fs.existsSync(AGENT_WORKSPACE) ? AGENT_WORKSPACE : process.cwd(),
+): Promise<ScriptResult | null> {
   const scriptPath = path.join('/tmp', `task-script-${taskId}.sh`);
   fs.writeFileSync(scriptPath, script, { mode: 0o755 });
 
@@ -24,7 +29,7 @@ export async function runScript(script: string, taskId: string): Promise<ScriptR
     execFile(
       'bash',
       [scriptPath],
-      { timeout: SCRIPT_TIMEOUT_MS, maxBuffer: SCRIPT_MAX_BUFFER, env: process.env },
+      { cwd: workingDirectory, timeout: SCRIPT_TIMEOUT_MS, maxBuffer: SCRIPT_MAX_BUFFER, env: process.env },
       (error, stdout, stderr) => {
         try {
           fs.unlinkSync(scriptPath);
@@ -64,21 +69,26 @@ export async function runScript(script: string, taskId: string): Promise<ScriptR
   });
 }
 
+/** Why a script gated its task: deliberate wakeAgent=false vs a broken script. */
+export type ScriptSkipReason = 'gated' | 'error';
+
 export interface TaskScriptOutcome {
   keep: MessageInRow[];
-  skipped: string[];
+  skipped: Array<{ id: string; reason: ScriptSkipReason }>;
 }
 
 /**
  * Run pre-task scripts for any task messages that carry one, serially.
- * - Errors / missing output / wakeAgent=false → task id added to `skipped`.
+ * - Errors / missing output / wakeAgent=false → task id added to `skipped`,
+ *   with the reason. The caller acks these as script-skips (not plain
+ *   completions) so the host can count consecutive failures and back off.
  * - wakeAgent=true → content JSON is mutated to carry `scriptOutput`, so the
  *   formatter renders it into the prompt.
  * Non-task messages and tasks without scripts pass through unchanged.
  */
 export async function applyPreTaskScripts(messages: MessageInRow[]): Promise<TaskScriptOutcome> {
   const keep: MessageInRow[] = [];
-  const skipped: string[] = [];
+  const skipped: Array<{ id: string; reason: ScriptSkipReason }> = [];
 
   for (const msg of messages) {
     if (msg.kind !== 'task') {
@@ -106,9 +116,9 @@ export async function applyPreTaskScripts(messages: MessageInRow[]): Promise<Tas
     touchHeartbeat();
 
     if (!result || !result.wakeAgent) {
-      const reason = result ? 'wakeAgent=false' : 'script error/no output';
-      log(`task ${msg.id} skipped: ${reason}`);
-      skipped.push(msg.id);
+      const reason: ScriptSkipReason = result ? 'gated' : 'error';
+      log(`task ${msg.id} skipped: ${reason === 'gated' ? 'wakeAgent=false' : 'script error/no output'}`);
+      skipped.push({ id: msg.id, reason });
       continue;
     }
 

@@ -7,38 +7,34 @@
 import path from 'path';
 
 import { backfillContainerConfigs } from './backfill-container-configs.js';
-import { DATA_DIR } from './config.js';
+import { DATA_DIR, CREDENTIAL_PROXY_PORT } from './config.js';
 import { enforceStartupBackoff, resetCircuitBreaker } from './circuit-breaker.js';
-import { migrateGroupsToClaudeLocal } from './claude-md-compose.js';
+import { startCredentialProxy, detectAuthMode } from './credential-proxy.js';
 import { initDb } from './db/connection.js';
 import { runMigrations } from './db/migrations/index.js';
+import { markRunningSessionsStopped } from './db/sessions.js';
 import { ensureContainerRuntimeRunning, cleanupOrphans } from './container-runtime.js';
 import { startActiveDeliveryPoll, startSweepDeliveryPoll, setDeliveryAdapter, stopDeliveryPolls } from './delivery.js';
 import { startHostSweep, stopHostSweep } from './host-sweep.js';
+import { startHostModules, stopHostModules } from './host-lifecycle.js';
 import { routeInbound } from './router.js';
 import { log } from './log.js';
+import { enforceUpgradeTripwire } from './upgrade-state.js';
 
-// Response + shutdown registries live in response-registry.ts to break the
+// Response registry lives in response-registry.ts to break the
 // circular import cycle: src/index.ts imports src/modules/index.js for side
-// effects, and the modules call registerResponseHandler/onShutdown at top
-// level — which would hit a TDZ error if the arrays lived here. Re-exported
-// here so existing callers see the same surface.
-import {
-  registerResponseHandler,
-  getResponseHandlers,
-  onShutdown,
-  getShutdownCallbacks,
-  type ResponsePayload,
-  type ResponseHandler,
-} from './response-registry.js';
-export { registerResponseHandler, onShutdown };
-export type { ResponsePayload, ResponseHandler };
+// effects, and the modules call registerResponseHandler at top level — which
+// would hit a TDZ error if the array lived here.
+import { getResponseHandlers, type ResponsePayload } from './response-registry.js';
+
+const hostAbortController = new AbortController();
 
 async function dispatchResponse(payload: ResponsePayload): Promise<void> {
   for (const handler of getResponseHandlers()) {
     try {
       const claimed = await handler(payload);
       if (claimed) return;
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
     } catch (err) {
       log.error('Response handler threw', { questionId: payload.questionId, err });
     }
@@ -61,13 +57,21 @@ import './cli/delivery-action.js';
 import { startCliServer, stopCliServer } from './cli/socket-server.js';
 
 import type { ChannelAdapter, ChannelSetup } from './channels/adapter.js';
-import { initChannelAdapters, teardownChannelAdapters, getChannelAdapter } from './channels/channel-registry.js';
+import {
+  initChannelAdapters,
+  teardownChannelAdapters,
+  createChannelDeliveryAdapter,
+} from './channels/channel-registry.js';
 
 async function main(): Promise<void> {
   log.info('NanoClaw starting');
 
   // 0. Circuit breaker — backoff on rapid restarts
   await enforceStartupBackoff();
+
+  // 0.5 Upgrade tripwire — refuse to start if this install was updated
+  // outside the sanctioned path (raw `git pull` instead of /update-nanoclaw).
+  enforceUpgradeTripwire();
 
   // 1. Init central DB
   const dbPath = path.join(DATA_DIR, 'v2.db');
@@ -79,12 +83,17 @@ async function main(): Promise<void> {
   // Idempotent — skips groups that already have a config row.
   backfillContainerConfigs();
 
-  // 1c. One-time filesystem cutover — idempotent, no-op after first run.
-  migrateGroupsToClaudeLocal();
+  // 2. Credential proxy (injects real API keys into container requests)
+  const proxyAuthMode = detectAuthMode();
+  await startCredentialProxy(CREDENTIAL_PROXY_PORT);
+  log.info('Credential proxy started', { port: CREDENTIAL_PROXY_PORT, authMode: proxyAuthMode });
 
-  // 2. Container runtime
+  // 3. Container runtime
   ensureContainerRuntimeRunning();
-  cleanupOrphans();
+  if (cleanupOrphans()) {
+    const reconciled = markRunningSessionsStopped();
+    if (reconciled > 0) log.info('Reconciled stale container session state', { count: reconciled });
+  }
 
   // 3. Channel adapters
   await initChannelAdapters((adapter: ChannelAdapter): ChannelSetup => {
@@ -92,6 +101,9 @@ async function main(): Promise<void> {
       onInbound(platformId, threadId, message) {
         routeInbound({
           channelType: adapter.channelType,
+          // The one host-side stamping seam: adapters stay instance-blind,
+          // the host stamps the receiving instance on every inbound event.
+          instance: adapter.instance ?? adapter.channelType,
           platformId,
           threadId,
           message: {
@@ -141,40 +153,26 @@ async function main(): Promise<void> {
     };
   });
 
-  // 4. Delivery adapter bridge — dispatches to channel adapters
-  const deliveryAdapter = {
-    async deliver(
-      channelType: string,
-      platformId: string,
-      threadId: string | null,
-      kind: string,
-      content: string,
-      files?: import('./channels/adapter.js').OutboundFile[],
-    ): Promise<string | undefined> {
-      const adapter = getChannelAdapter(channelType);
-      if (!adapter) {
-        log.warn('No adapter for channel type', { channelType });
-        return;
-      }
-      return adapter.deliver(platformId, threadId, { kind, content: JSON.parse(content), files });
-    },
-    async setTyping(channelType: string, platformId: string, threadId: string | null): Promise<void> {
-      const adapter = getChannelAdapter(channelType);
-      await adapter?.setTyping?.(platformId, threadId);
-    },
-  };
-  setDeliveryAdapter(deliveryAdapter);
+  // 4. Delivery adapter bridge — dispatches to channel adapters by EXACT
+  // registry key (instance ?? channelType): a named instance with an
+  // offline adapter is never rerouted through a sibling bot. See
+  // createChannelDeliveryAdapter in channels/channel-registry.ts.
+  setDeliveryAdapter(createChannelDeliveryAdapter());
 
-  // 5. Start delivery polls
+  // 5. Start registered host modules. Imports only registered callbacks; the
+  // actual work begins here, after DB + delivery are ready and before polls.
+  await startHostModules({ db, signal: hostAbortController.signal });
+
+  // 6. Start delivery polls
   startActiveDeliveryPoll();
   startSweepDeliveryPoll();
   log.info('Delivery polls started');
 
-  // 6. Start host sweep
+  // 7. Start host sweep
   startHostSweep();
   log.info('Host sweep started');
 
-  // 7. Start the `ncl` CLI socket server (data/ncl.sock).
+  // 8. Start the `ncl` CLI socket server (data/ncl.sock).
   await startCliServer();
 
   log.info('NanoClaw running');
@@ -183,13 +181,8 @@ async function main(): Promise<void> {
 /** Graceful shutdown. */
 async function shutdown(signal: string): Promise<void> {
   log.info('Shutdown signal received', { signal });
-  for (const cb of getShutdownCallbacks()) {
-    try {
-      await cb();
-    } catch (err) {
-      log.error('Shutdown callback threw', { err });
-    }
-  }
+  hostAbortController.abort();
+  await stopHostModules();
   stopDeliveryPolls();
   stopHostSweep();
   await stopCliServer();

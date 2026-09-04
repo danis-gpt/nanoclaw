@@ -26,11 +26,14 @@ import {
   getSessionsByAgentGroup,
   getActiveSessions,
   getRunningSessions,
+  markRunningSessionsStopped,
   updateSession,
   deleteSession,
   createPendingQuestion,
   getPendingQuestion,
   deletePendingQuestion,
+  getContainerConfig,
+  createContainerConfig,
 } from './index.js';
 
 function now() {
@@ -54,6 +57,49 @@ describe('migrations', () => {
     runMigrations(db);
     // Running again should not throw
     runMigrations(db);
+  });
+
+  it('adds messaging_group_agents.threads as a nullable, default-free override column (019)', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    const col = db
+      .prepare(
+        `SELECT type, "notnull", dflt_value FROM pragma_table_info('messaging_group_agents') WHERE name = 'threads'`,
+      )
+      .get() as { type: string; notnull: number; dflt_value: unknown } | undefined;
+    expect(col).toBeDefined();
+    // NULL must remain expressible (= inherit the adapter declaration) with
+    // no default — a backfill would freeze today's behavior into rows.
+    expect(col!.type).toBe('INTEGER');
+    expect(col!.notnull).toBe(0);
+    expect(col!.dflt_value).toBeNull();
+  });
+
+  it('adds a nullable exact thread filter and its lookup index (023)', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    const col = db
+      .prepare(
+        `SELECT type, "notnull", dflt_value FROM pragma_table_info('messaging_group_agents') WHERE name = 'thread_filter'`,
+      )
+      .get() as { type: string; notnull: number; dflt_value: unknown } | undefined;
+    expect(col).toEqual({ type: 'TEXT', notnull: 0, dflt_value: null });
+
+    const index = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_mga_messaging_group_thread_filter'`)
+      .get();
+    expect(index).toEqual({ name: 'idx_mga_messaging_group_thread_filter' });
+  });
+
+  it('persists approval card bodies for terminal rendering (021)', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    for (const table of ['pending_approvals', 'pending_channel_approvals', 'pending_sender_approvals']) {
+      const col = db
+        .prepare(`SELECT type, "notnull", dflt_value FROM pragma_table_info(?) WHERE name = 'question'`)
+        .get(table) as { type: string; notnull: number; dflt_value: string } | undefined;
+      expect(col, table).toEqual({ type: 'TEXT', notnull: 1, dflt_value: "''" });
+    }
   });
 });
 
@@ -192,6 +238,11 @@ describe('messaging group agents', () => {
     const results = getMessagingGroupAgents('mg-1');
     expect(results).toHaveLength(1);
     expect(results[0].agent_group_id).toBe('ag-1');
+  });
+
+  it('should persist an exact thread filter on a wiring', () => {
+    createMessagingGroupAgent({ ...mga(), thread_filter: 'telegram:-100123:101' });
+    expect(getMessagingGroupAgent('mga-1')!.thread_filter).toBe('telegram:-100123:101');
   });
 
   it('should order by priority descending', () => {
@@ -354,6 +405,16 @@ describe('sessions', () => {
     expect(getRunningSessions()).toHaveLength(2);
   });
 
+  it('should reconcile stale running flags after startup orphan cleanup', () => {
+    createSession({ ...sess(), container_status: 'running' });
+    createSession({ ...sess(), id: 'sess-idle', container_status: 'idle', thread_id: 'thread-1' });
+    createSession({ ...sess(), id: 'sess-stopped', container_status: 'stopped', thread_id: 'thread-2' });
+
+    expect(markRunningSessionsStopped()).toBe(2);
+    expect(getRunningSessions()).toHaveLength(0);
+    expect(getSession('sess-1')!.container_status).toBe('stopped');
+  });
+
   it('should update', () => {
     createSession(sess());
     updateSession('sess-1', { container_status: 'running', last_active: now() });
@@ -426,5 +487,34 @@ describe('pending questions', () => {
     });
     deletePendingQuestion('q-1');
     expect(getPendingQuestion('q-1')).toBeUndefined();
+  });
+});
+
+// ── Container Configs ──
+
+describe('container configs', () => {
+  it('createContainerConfig persists cli_scope', () => {
+    createAgentGroup({ id: 'ag-full', name: 'Full', folder: 'full', agent_provider: null, created_at: now() });
+    createContainerConfig({
+      agent_group_id: 'ag-full',
+      provider: null,
+      model: null,
+      effort: null,
+      image_tag: null,
+      assistant_name: null,
+      max_messages_per_prompt: null,
+      idle_timeout_ms: null,
+      skills: '["all"]',
+      mcp_servers: '{}',
+      packages_apt: '[]',
+      packages_npm: '[]',
+      additional_mounts: '[]',
+      cli_scope: 'global',
+      timezone: null,
+      updated_at: now(),
+    });
+    const row = getContainerConfig('ag-full');
+    expect(row).toBeDefined();
+    expect(row!.cli_scope).toBe('global');
   });
 });

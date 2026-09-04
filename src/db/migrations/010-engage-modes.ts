@@ -38,6 +38,7 @@ function backfill(row: LegacyRow): {
   if (row.trigger_rules) {
     try {
       parsed = JSON.parse(row.trigger_rules) as Record<string, unknown>;
+      // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
     } catch {
       // Invalid JSON falls through to conservative defaults.
     }

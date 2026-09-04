@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Setup helper: install-github — bundles the preflight + install commands
-# from the /add-github skill into one idempotent script so /new-setup can
+# from the /add-github skill into one idempotent script so /setup can
 # run them programmatically before continuing to credentials.
 #
 # Copies the GitHub adapter in from the `channels` branch; appends the
@@ -37,7 +37,7 @@ if ! grep -q "import './github.js';" src/channels/index.ts; then
 fi
 
 echo "STEP: pnpm-install"
-pnpm install @chat-adapter/github@4.26.0
+pnpm install @chat-adapter/github@4.29.0
 
 echo "STEP: pnpm-build"
 pnpm run build

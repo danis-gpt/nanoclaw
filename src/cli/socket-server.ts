@@ -22,6 +22,7 @@ export async function startCliServer(socketPath: string = DEFAULT_SOCKET_PATH): 
   // file behind, and net.createServer refuses to bind to an existing path.
   try {
     fs.unlinkSync(socketPath);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch (err) {
     const e = err as NodeJS.ErrnoException;
     if (e.code !== 'ENOENT') {
@@ -36,6 +37,7 @@ export async function startCliServer(socketPath: string = DEFAULT_SOCKET_PATH): 
     s.listen(socketPath, () => {
       try {
         fs.chmodSync(socketPath, 0o600);
+        // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
       } catch (err) {
         log.warn('Failed to chmod ncl socket (continuing)', { socketPath, err });
       }
@@ -75,6 +77,7 @@ async function handleFrame(conn: net.Socket, line: string): Promise<void> {
     const parsed: unknown = JSON.parse(line);
     if (!isRequestFrame(parsed)) throw new Error('bad request shape');
     req = parsed;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch (e) {
     write(conn, {
       id: 'unknown',
@@ -99,6 +102,7 @@ function write(conn: net.Socket, frame: ResponseFrame): void {
   try {
     conn.write(JSON.stringify(frame) + '\n');
     conn.end();
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch (err) {
     log.warn('Failed to write ncl CLI response', { err });
   }

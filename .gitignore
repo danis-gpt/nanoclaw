@@ -27,6 +27,9 @@ groups/*
 
 # Temp files
 .tmp-*
+.worktrees/
+__pycache__/
+*.py[cod]
 
 # OS
 .DS_Store
@@ -39,3 +42,10 @@ groups/*
 .nanoclaw/
 
 agents-sdk-docs
+.agents
+AGENTS.md
+
+# Internal working docs, never committed
+docs/maintainer-guide.md
+docs/drafts/
+forks.md

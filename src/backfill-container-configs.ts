@@ -40,6 +40,7 @@ export function backfillContainerConfigs(): void {
     if (fs.existsSync(filePath)) {
       try {
         legacy = JSON.parse(fs.readFileSync(filePath, 'utf8')) as LegacyContainerJson;
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
       } catch (err) {
         log.warn('Backfill: failed to parse container.json, using defaults', {
           folder: group.folder,
@@ -59,12 +60,14 @@ export function backfillContainerConfigs(): void {
       image_tag: legacy.imageTag ?? null,
       assistant_name: legacy.assistantName ?? null,
       max_messages_per_prompt: legacy.maxMessagesPerPrompt ?? null,
+      idle_timeout_ms: null,
       skills: JSON.stringify(legacy.skills ?? 'all'),
       mcp_servers: JSON.stringify(legacy.mcpServers ?? {}),
       packages_apt: JSON.stringify(legacy.packages?.apt ?? []),
       packages_npm: JSON.stringify(legacy.packages?.npm ?? []),
       additional_mounts: JSON.stringify(legacy.additionalMounts ?? []),
       cli_scope: 'group',
+      timezone: null,
       updated_at: new Date().toISOString(),
     };
 

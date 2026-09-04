@@ -11,6 +11,7 @@ import path from 'path';
 
 import { log } from '../src/log.js';
 import { getLaunchdLabel, getSystemdUnit } from '../src/install-slug.js';
+import { writeUpgradeState } from '../src/upgrade-state.js';
 import { cleanupUnhealthyPeers } from './peer-cleanup.js';
 import {
   commandExists,
@@ -54,6 +55,11 @@ export async function run(_args: string[]): Promise<void> {
 
   fs.mkdirSync(path.join(projectRoot, 'logs'), { recursive: true });
 
+  // Stamp the upgrade marker before the host first starts, so the startup
+  // tripwire (enforceUpgradeTripwire) sees this as a sanctioned install.
+  const stamped = writeUpgradeState({ via: 'setup' });
+  log.info('Stamped upgrade marker', { version: stamped.version });
+
   // Peer preflight — a crash-looping peer install (most often the legacy v1
   // `com.nanoclaw` plist) will keep trashing this install's containers on
   // every respawn via its own cleanupOrphans. Detect and unload any peer
@@ -64,6 +70,12 @@ export async function run(_args: string[]): Promise<void> {
     log.warn('Unloaded unhealthy peer NanoClaw services', {
       count: peerReport.unloaded.length,
       labels: peerReport.unloaded.map((p) => p.label),
+    });
+  }
+  if (peerReport.removed.length > 0) {
+    log.warn('Removed dead peer NanoClaw registrations (target binary missing)', {
+      count: peerReport.removed.length,
+      labels: peerReport.removed.map((p) => p.label),
     });
   }
 
@@ -193,6 +205,16 @@ function setupLaunchd(
     log.info('launchctl load succeeded');
   } catch (err) {
     log.error('launchctl load failed', { err });
+  }
+
+  // launchd can leave a freshly loaded RunAtLoad job queued without ever
+  // spawning it (`launchctl print` shows "pended nondemand spawn =
+  // speculative", runs = 0, indefinitely — seen live 2026-08-10). kickstart
+  // demand-starts it, and is a no-op on a job that load already spawned.
+  try {
+    execSync(`launchctl kickstart gui/${process.getuid!()}/${label}`, { stdio: 'ignore' });
+  } catch (err) {
+    log.error('launchctl kickstart failed', { err });
   }
 
   // Verify

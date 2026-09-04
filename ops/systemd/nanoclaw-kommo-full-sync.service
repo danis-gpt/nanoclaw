@@ -1,0 +1,10 @@
+[Unit]
+Description=NanoClaw Kommo weekly full sync
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ubuntu/pr/nanoclaw1/nanoclaw-v2
+Environment=KOMMO_MCP_URL=http://127.0.0.1:8001/mcp
+Environment=KOMMO_MCP_REQUEST_TIMEOUT_SECONDS=7200
+ExecStart=/usr/bin/python3 ops/kommo-sync-health.py sync --full --wait --max-age-hours 6 --timeout-seconds 1800

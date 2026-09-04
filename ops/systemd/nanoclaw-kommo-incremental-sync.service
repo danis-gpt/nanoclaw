@@ -1,0 +1,9 @@
+[Unit]
+Description=NanoClaw Kommo incremental sync freshness gate
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ubuntu/pr/nanoclaw1/nanoclaw-v2
+Environment=KOMMO_MCP_URL=http://127.0.0.1:8001/mcp
+ExecStart=/usr/bin/python3 ops/kommo-sync-health.py ensure-fresh --max-age-hours 2 --sync-if-stale --timeout-seconds 900

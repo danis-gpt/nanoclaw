@@ -28,6 +28,7 @@ export class SocketTransport implements Transport {
         settled = true;
         try {
           client.end();
+          // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
         } catch (_e) {
           // best-effort
         }
@@ -47,6 +48,7 @@ export class SocketTransport implements Transport {
         try {
           const frame = JSON.parse(line) as ResponseFrame;
           settle('resolve', frame);
+          // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
         } catch (e) {
           settle('reject', new Error(`malformed response from host: ${e instanceof Error ? e.message : String(e)}`));
         }

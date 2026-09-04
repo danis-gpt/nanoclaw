@@ -9,13 +9,16 @@ import { CONTAINER_INSTALL_LABEL } from './config.js';
 import { log } from './log.js';
 
 /** The container runtime binary name. */
-export const CONTAINER_RUNTIME_BIN = 'docker';
+export const CONTAINER_RUNTIME_BIN = 'podman';
 
 /** CLI args needed for the container to resolve the host gateway. */
 export function hostGatewayArgs(): string[] {
-  // On Linux, host.docker.internal isn't built-in — add it explicitly
+  if (CONTAINER_RUNTIME_BIN === 'podman') {
+    return [];
+  }
+  // Podman rootless: host.containers.internal resolves via slirp4netns/pasta
   if (os.platform() === 'linux') {
-    return ['--add-host=host.docker.internal:host-gateway'];
+    return ['--add-host=host.containers.internal:host-gateway'];
   }
   return [];
 }
@@ -64,7 +67,7 @@ export function ensureContainerRuntimeRunning(): void {
  * cannot reap our containers, and we cannot reap theirs. The label is
  * stamped onto every container at spawn time — see container-runner.ts.
  */
-export function cleanupOrphans(): void {
+export function cleanupOrphans(): boolean {
   try {
     const output = execSync(
       `${CONTAINER_RUNTIME_BIN} ps --filter label=${CONTAINER_INSTALL_LABEL} --format '{{.Names}}'`,
@@ -77,6 +80,7 @@ export function cleanupOrphans(): void {
     for (const name of orphans) {
       try {
         stopContainer(name);
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
       } catch {
         /* already stopped */
       }
@@ -84,7 +88,10 @@ export function cleanupOrphans(): void {
     if (orphans.length > 0) {
       log.info('Stopped orphaned containers', { count: orphans.length, names: orphans });
     }
+    return true;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- the host boundary handles and reports this failure
   } catch (err) {
     log.warn('Failed to clean up orphaned containers', { err });
+    return false;
   }
 }

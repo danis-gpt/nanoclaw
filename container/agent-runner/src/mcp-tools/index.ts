@@ -6,10 +6,10 @@
  * at module scope, and append the import here. No central list.
  */
 import './core.js';
-import './scheduling.js';
 import './interactive.js';
 import './agents.js';
 import './self-mod.js';
+import './idea-feature.js';
 import { startMcpServer } from './server.js';
 
 function log(msg: string): void {

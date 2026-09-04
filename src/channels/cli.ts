@@ -39,10 +39,29 @@ import path from 'path';
 
 import { DATA_DIR } from '../config.js';
 import { log } from '../log.js';
-import type { ChannelAdapter, ChannelSetup, DeliveryAddress, InboundEvent, OutboundMessage } from './adapter.js';
+import type {
+  ChannelAdapter,
+  ChannelDefaults,
+  ChannelSetup,
+  DeliveryAddress,
+  InboundEvent,
+  OutboundMessage,
+} from './adapter.js';
 import { registerChannelAdapter } from './channel-registry.js';
 
 const PLATFORM_ID = 'local';
+
+/**
+ * Terminal transport: every line the operator types is for the agent
+ * (pattern '.'), the socket is owner-only so senders are trusted ('public'),
+ * there is no thread or mention concept. Matches what
+ * scripts/init-cli-agent.ts has always created.
+ */
+const CLI_DEFAULTS: ChannelDefaults = {
+  dm: { engageMode: 'pattern', engagePattern: '.', threads: false, unknownSenderPolicy: 'public' },
+  group: { engageMode: 'pattern', engagePattern: '.', threads: false, unknownSenderPolicy: 'public' },
+  mentions: 'never',
+};
 
 function socketPath(): string {
   return path.join(DATA_DIR, 'cli.sock');
@@ -56,6 +75,7 @@ function createAdapter(): ChannelAdapter {
     name: 'cli',
     channelType: 'cli',
     supportsThreads: false,
+    defaults: CLI_DEFAULTS,
 
     async setup(config: ChannelSetup): Promise<void> {
       const sock = socketPath();
@@ -64,6 +84,7 @@ function createAdapter(): ChannelAdapter {
       // file behind, and net.createServer refuses to bind to an existing path.
       try {
         fs.unlinkSync(sock);
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch (err) {
         const e = err as NodeJS.ErrnoException;
         if (e.code !== 'ENOENT') {
@@ -80,6 +101,7 @@ function createAdapter(): ChannelAdapter {
           // users can't send into this agent.
           try {
             fs.chmodSync(sock, 0o600);
+            // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
           } catch (err) {
             log.warn('Failed to chmod CLI socket (continuing)', { sock, err });
           }
@@ -93,6 +115,7 @@ function createAdapter(): ChannelAdapter {
       if (client) {
         try {
           client.end();
+          // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
         } catch {
           // swallow — teardown is best-effort
         }
@@ -107,6 +130,7 @@ function createAdapter(): ChannelAdapter {
       // Remove the socket file so a relaunch doesn't trip over it.
       try {
         fs.unlinkSync(socketPath());
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch {
         // swallow
       }
@@ -128,6 +152,7 @@ function createAdapter(): ChannelAdapter {
       if (text === null) return undefined;
       try {
         client.write(JSON.stringify({ text }) + '\n');
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch (err) {
         log.warn('Failed to write to CLI client', { err });
       }
@@ -148,6 +173,7 @@ function createAdapter(): ChannelAdapter {
         try {
           client.write(JSON.stringify({ text: '[superseded by a newer client]' }) + '\n');
           client.end();
+          // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
         } catch {
           // swallow
         }
@@ -189,6 +215,7 @@ function createAdapter(): ChannelAdapter {
     try {
       payload = JSON.parse(line);
     } catch (err) {
+      if (!(err instanceof SyntaxError)) throw err;
       log.warn('CLI: ignoring non-JSON line from client', { line });
       return;
     }
@@ -219,6 +246,7 @@ function createAdapter(): ChannelAdapter {
       };
       try {
         await config.onInboundEvent(event);
+        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch (err) {
         log.error('CLI: onInboundEvent threw', { err });
       }
@@ -239,6 +267,7 @@ function createAdapter(): ChannelAdapter {
           senderId: `cli:${PLATFORM_ID}`,
         },
       });
+      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch (err) {
       log.error('CLI: onInbound threw', { err });
     }
@@ -273,4 +302,4 @@ function extractText(message: OutboundMessage): string | null {
   return null;
 }
 
-registerChannelAdapter('cli', { factory: createAdapter });
+registerChannelAdapter('cli', { factory: createAdapter, defaults: CLI_DEFAULTS });

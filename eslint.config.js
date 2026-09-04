@@ -25,8 +25,8 @@ export default [
           ignoreRestSiblings: true,
         },
       ],
-      'no-catch-all/no-catch-all': 'warn',
-      '@typescript-eslint/no-explicit-any': 'warn',
+      'no-catch-all/no-catch-all': 'error',
+      '@typescript-eslint/no-explicit-any': 'error',
     },
   },
 ]

@@ -38,13 +38,20 @@ async function main(): Promise<void> {
   let res;
   try {
     res = await transport.sendFrame(req);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- this boundary has an explicit fallback for the failure
   } catch (e) {
     process.stderr.write(formatTransportError(e));
     process.exit(2);
   }
 
-  process.stdout.write(formatResponse(res, json ? 'json' : 'human'));
-  process.exit(res.ok ? 0 : 1);
+  const output =
+    !json && res.ok && res.human !== undefined
+      ? res.human + '\n' // server-rendered view — print verbatim
+      : formatResponse(res, json ? 'json' : 'human');
+  // Exit only after stdout drains: process.exit() discards buffered pipe
+  // writes, silently truncating any response past the 64KB pipe buffer
+  // (bit `ncl sessions list --json` at scale).
+  process.stdout.write(output, () => process.exit(res.ok ? 0 : 1));
 }
 
 function pickTransport(): Transport {
