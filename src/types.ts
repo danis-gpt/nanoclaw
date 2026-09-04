@@ -75,11 +75,12 @@ export interface User {
   created_at: string;
 }
 
-export type UserRoleKind = 'owner' | 'admin';
+export type UserRoleKind = 'owner' | 'admin' | 'product_approver' | 'technical_approver';
 
 /**
  * Role grant. Owner is always global. Admin is either global
- * (agent_group_id = null) or scoped to a specific agent group.
+ * (agent_group_id = null) or scoped to a specific agent group. Domain
+ * approver roles are always scoped and do not imply admin privilege.
  * Admin @ A implicitly makes the user a member of A — we do not require
  * a separate agent_group_members row for admins.
  */
