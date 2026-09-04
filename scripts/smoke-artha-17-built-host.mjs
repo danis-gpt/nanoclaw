@@ -226,7 +226,7 @@ async function smoke({ distBundle, recoveryBundle }) {
       .run(USER, 'technical_approver', PRODUCT_GROUP, 'smoke', '2026-09-02T00:00:00.000Z');
     normalSeed.close();
     const connection = await import(dist('db/connection.js'));
-    connection.initDb(normalDb);
+    await connection.initDb(normalDb);
     let stopFixtureServer;
     const socketPath = path.join(fixtureRoot, 'data', 'ncl.sock');
     try {
@@ -245,15 +245,15 @@ async function smoke({ distBundle, recoveryBundle }) {
       const grant = ['roles', 'grant', '--user', USER, '--role', 'product_approver', '--group', PRODUCT_GROUP];
       await invoke([...grant, '--granted-by', 'smoke']);
       await invoke([...grant, '--granted-by', 'repeat']);
-      assert.equal(connection.getDb().prepare('SELECT count(*) AS n FROM user_roles').get().n, 2);
+      assert.equal((await connection.getDb().get('SELECT count(*) AS n FROM user_roles')).n, 2);
       await assert.rejects(invoke(['roles', 'revoke', '--user', USER, '--role', 'owner']), /Command failed/u);
       await invoke(['roles', 'revoke', '--user', USER, '--role', 'product_approver', '--group', PRODUCT_GROUP]);
-      assert.deepEqual(connection.getDb().prepare('SELECT role FROM user_roles ORDER BY role').all(), [
+      assert.deepEqual(await connection.getDb().all('SELECT role FROM user_roles ORDER BY role'), [
         { role: 'technical_approver' },
       ]);
     } finally {
       await stopFixtureServer?.();
-      connection.closeDb();
+      await connection.closeDb();
     }
     assert.equal(fs.existsSync(socketPath), false, 'Unix socket must be removed after server stop');
 
