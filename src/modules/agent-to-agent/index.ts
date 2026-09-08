@@ -28,7 +28,7 @@ import { createAgent, requestCreateAgentHold, validateCreateAgent } from './crea
 import { agentsCreate } from './guard.js';
 import { applyA2aMessageGate } from './message-gate.js';
 
-registerDeliveryAction('create_agent', createAgent, {
+registerDeliveryAction('create_agent', (content, session, _grant) => createAgent(content, session), {
   guardAction: agentsCreate,
   precheck: validateCreateAgent,
   requestHold: requestCreateAgentHold,

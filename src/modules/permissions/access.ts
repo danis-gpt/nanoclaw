@@ -2,7 +2,7 @@
  * Access control.
  *
  * Privilege is user-level, not group-level. A user holds zero or more roles
- * (owner | admin) via `user_roles`, and is optionally "known" in specific
+ * (owner | admin, plus non-admin domain approver roles) via `user_roles`, and is optionally "known" in specific
  * agent groups via `agent_group_members`. Admins are implicitly members of
  * the groups they administer.
  *

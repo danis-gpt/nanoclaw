@@ -1,6 +1,8 @@
 import type { UserRole, UserRoleKind } from '../../../types.js';
 import { getDb } from '../../../db/connection.js';
 
+export type DomainApproverRole = 'product_approver' | 'technical_approver';
+
 /**
  * Grant a role. Owner rows must have agent_group_id = null (enforced here,
  * not by schema, so callers get a clean error path).
@@ -9,10 +11,35 @@ export async function grantRole(row: UserRole): Promise<void> {
   if (row.role === 'owner' && row.agent_group_id !== null) {
     throw new Error('owner role must be global (agent_group_id = null)');
   }
+  if ((row.role === 'product_approver' || row.role === 'technical_approver') && row.agent_group_id === null) {
+    throw new Error('domain approver role must be scoped (agent_group_id is required)');
+  }
   await getDb().run(
     `INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at)
      VALUES (@user_id, @role, @agent_group_id, @granted_by, @granted_at)`,
     row,
+  );
+}
+
+/** Exact domain-role check. Owner/admin grants deliberately do not satisfy it. */
+export async function hasScopedRole(userId: string, role: DomainApproverRole, agentGroupId: string): Promise<boolean> {
+  const row = await getDb().get(
+    'SELECT 1 FROM user_roles WHERE user_id = ? AND role = ? AND agent_group_id = ? LIMIT 1',
+    userId,
+    role,
+    agentGroupId,
+  );
+  return !!row;
+}
+
+/** Deterministic exact holders used to enforce the one-configured-approver invariant. */
+export async function getScopedRoleHolders(role: DomainApproverRole, agentGroupId: string): Promise<UserRole[]> {
+  return getDb().all<UserRole>(
+    `SELECT * FROM user_roles
+     WHERE role = ? AND agent_group_id = ?
+     ORDER BY granted_at, user_id`,
+    role,
+    agentGroupId,
   );
 }
 
