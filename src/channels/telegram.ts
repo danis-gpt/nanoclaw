@@ -82,13 +82,23 @@ async function withRetry<T>(fn: () => Promise<T>, label: string, maxAttempts = 5
   throw lastErr;
 }
 
+function normalizeTelegramUsername(username: unknown): string | null {
+  if (typeof username !== 'string') return null;
+  const normalized = username.trim().replace(/^@/, '').toLowerCase();
+  return normalized || null;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function extractReplyContext(raw: Record<string, any>): ReplyContext | null {
+export function extractTelegramReplyContext(raw: Record<string, any>, botUsername: string | null): ReplyContext | null {
   if (!raw.reply_to_message) return null;
   const reply = raw.reply_to_message;
+  const from = reply.from;
+  const expectedUsername = normalizeTelegramUsername(botUsername);
+  const replyUsername = normalizeTelegramUsername(from?.username);
   return {
     text: reply.text || reply.caption || '',
-    sender: reply.from?.first_name || reply.from?.username || 'Unknown',
+    sender: from?.first_name || from?.username || 'Unknown',
+    isReplyToBot: from?.is_bot === true && expectedUsername !== null && replyUsername === expectedUsername,
   };
 }
 
@@ -298,6 +308,11 @@ function createPairingInterceptor(
 }
 
 function createSingleTelegramBridge(config: TelegramBotConfig): TelegramBotBridge {
+  const identity: { username: string | null } = { username: null };
+  const botUsernamePromise = fetchBotUsername(config.token).then((username) => {
+    identity.username = username;
+    return username;
+  });
   const telegramAdapter = createTelegramAdapter({
     botToken: config.token,
     mode: 'polling',
@@ -305,7 +320,7 @@ function createSingleTelegramBridge(config: TelegramBotConfig): TelegramBotBridg
   const bridge = createChatSdkBridge({
     adapter: telegramAdapter,
     concurrency: 'concurrent',
-    extractReplyContext,
+    extractReplyContext: (raw) => extractTelegramReplyContext(raw, identity.username),
     supportsThreads: true,
     defaults: TELEGRAM_DEFAULTS,
     transformOutboundText: sanitizeTelegramLegacyMarkdown,
@@ -317,7 +332,7 @@ function createSingleTelegramBridge(config: TelegramBotConfig): TelegramBotBridg
     envKey: config.envKey,
     token: config.token,
     bridge,
-    botUsernamePromise: fetchBotUsername(config.token),
+    botUsernamePromise,
   };
 }
 
@@ -351,6 +366,10 @@ function createTelegramMultiplexer(botConfigs: TelegramBotConfig[]): ChannelAdap
 
     async setup(hostConfig: ChannelSetup) {
       for (const bridge of bridges) {
+        // Resolve this bridge's identity before polling starts so even the
+        // first inbound reply is classified deterministically. getMe failures
+        // resolve to null and therefore fail closed without blocking setup.
+        await bridge.botUsernamePromise;
         const intercepted: ChannelSetup = {
           ...hostConfig,
           onInbound: createPairingInterceptor(
