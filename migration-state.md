@@ -173,9 +173,9 @@ Containers:
 - kommo-mcp image `kommo-mcp-kommo-mcp`, command `python -m kommo_mcp.mcp_http`, READONLY_MODE=true
 - kommo-db image `postgres:15-alpine`, DB `kommo_mcp`, volume `kommo-mcp_kommo_db_data`
 Networks:
-- kommo-mcp is on `openclaw_default` as 172.19.0.4 and `kommo_net` as 172.21.0.2
+- kommo-mcp has pinned addresses: `openclaw_default` as 172.19.0.2 and `kommo_net` as 172.21.0.3
 - dockclaw-dd resolves `kommo-mcp` through `openclaw_default`
-- NanoClaw Podman host container does not resolve `kommo-mcp`, but can reach http://172.19.0.4:8001 and http://172.21.0.2:8001
+- NanoClaw Podman host container does not resolve `kommo-mcp`, but can reach the pinned endpoints http://172.19.0.2:8001 and http://172.21.0.3:8001
 Credentials/env are in kommo-mcp container; sensitive values not copied.
 KommoMCP env keys observed: KOMMO_SUBDOMAIN=itlsmart2, KOMMO_ACCESS_TOKEN, DATABASE_URL, GROQ_API_KEY, MEGAPBX_PROXY_TOKEN, READONLY_MODE=true.
 OpenClaw CLI:
@@ -195,7 +195,7 @@ Radar learned rules:
 - "Диалоги" is manual and not reliably automatable
 NanoClaw migration implication:
 - Current NanoClaw agent containers for aura/radar/vektor have python3 and `scripts/kommo-cli.py`.
-- Kommo CLI defaults to OpenClaw Docker DNS first, then Docker bridge URLs `http://172.21.0.2:8001/mcp` and `http://172.19.0.4:8001/mcp`; can be overridden with `KOMMO_MCP_URL`.
+- Agent Kommo CLIs default to the pinned Docker bridge URLs `http://172.21.0.3:8001/mcp` and `http://172.19.0.2:8001/mcp`, then Docker DNS and host loopback; they can be overridden with `KOMMO_MCP_URL`.
 - The CLI keeps the OpenClaw-compatible commands: ping, leads, lead, contacts, pipelines, users, analytics, search, report, insights, deals, tasks, alerts, events, entity, sql, raw.
 - SQL guidance is written into aura/radar/vektor `CLAUDE.local.md`: use `python3 scripts/kommo-cli.py sql ...`, not `raw kommo_sql`.
 - Verified from host and from all three per-agent Podman images; `SELECT count(*) AS leads_count FROM leads` returned 6700.

@@ -15,9 +15,11 @@ from typing import Any
 
 
 DEFAULT_MCP_URLS = [
-    "http://172.21.0.2:8001/mcp",
+    "http://127.0.0.1:8001/mcp",
+    # Static addresses pinned in /home/ubuntu/kommo-mcp/docker-compose.yml.
+    "http://172.21.0.3:8001/mcp",
+    "http://172.19.0.2:8001/mcp",
     "http://kommo-mcp:8001/mcp",
-    "http://172.19.0.4:8001/mcp",
 ]
 
 

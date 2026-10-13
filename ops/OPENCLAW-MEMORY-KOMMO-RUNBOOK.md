@@ -68,19 +68,19 @@ systemctl --user disable --now nanoclaw-openclaw-memory-refresh.timer
 Check freshness:
 
 ```bash
-KOMMO_MCP_URL=http://172.21.0.2:8001/mcp python3 ops/kommo-sync-health.py freshness --max-age-hours 6
+KOMMO_MCP_URL=http://172.21.0.3:8001/mcp python3 ops/kommo-sync-health.py freshness --max-age-hours 6
 ```
 
 Trigger incremental sync and wait:
 
 ```bash
-KOMMO_MCP_URL=http://172.21.0.2:8001/mcp python3 ops/kommo-sync-health.py sync --wait --max-age-hours 6
+KOMMO_MCP_URL=http://172.21.0.3:8001/mcp python3 ops/kommo-sync-health.py sync --wait --max-age-hours 6
 ```
 
 Agent CLI smoke test:
 
 ```bash
-KOMMO_MCP_URL=http://172.21.0.2:8001/mcp python3 groups/radar/scripts/kommo-cli.py sql 'SELECT count(*) AS leads_count FROM leads;'
+KOMMO_MCP_URL=http://172.21.0.3:8001/mcp python3 groups/radar/scripts/kommo-cli.py sql 'SELECT count(*) AS leads_count FROM leads;'
 ```
 
 Installed user timers:
