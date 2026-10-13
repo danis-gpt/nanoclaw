@@ -23,7 +23,7 @@ import { readEnvFile } from '../env.js';
 import { DATA_DIR } from '../config.js';
 import { log } from '../log.js';
 import { registerChannelAdapter } from './channel-registry.js';
-import type { ChannelAdapter, ChannelSetup, InboundMessage, OutboundMessage } from './adapter.js';
+import type { ChannelAdapter, ChannelDefaults, ChannelSetup, InboundMessage, OutboundMessage } from './adapter.js';
 
 const DATA_SUBDIR = path.join(DATA_DIR, 'wechat');
 const AUTH_FILE = path.join(DATA_SUBDIR, 'auth.json');
@@ -41,7 +41,6 @@ interface SavedAuth {
 function loadAuth(): SavedAuth | null {
   try {
     return JSON.parse(fs.readFileSync(AUTH_FILE, 'utf8')) as SavedAuth;
-    // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
   } catch {
     return null;
   }
@@ -55,7 +54,6 @@ function saveAuth(auth: SavedAuth): void {
 function loadSyncBuf(): string | undefined {
   try {
     return fs.readFileSync(SYNC_BUF_FILE, 'utf8');
-    // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
   } catch {
     return undefined;
   }
@@ -76,6 +74,19 @@ function messageText(msg: OutboundMessage): string {
   const c = msg.content as Record<string, unknown>;
   return (c.text as string) || (c.markdown as string) || JSON.stringify(msg.content);
 }
+
+/**
+ * Shared personal account (iLink bot rides the operator's own WeChat), so
+ * auto-create is 'strict' and groups engage on the agent's name — group tags
+ * address the human, and iLink exposes no bot-mention metadata anyway. The
+ * adapter emits top-level isGroup and isMention=true for DMs, so mention
+ * wirings can fire only there: 'dm-only'.
+ */
+const WECHAT_DEFAULTS: ChannelDefaults = {
+  dm: { engageMode: 'pattern', engagePattern: '.', threads: false, unknownSenderPolicy: 'strict' },
+  group: { engageMode: 'pattern', engagePattern: '\\b{name}\\b', threads: false, unknownSenderPolicy: 'strict' },
+  mentions: 'dm-only',
+};
 
 registerChannelAdapter('wechat', {
   factory: () => {
@@ -149,6 +160,11 @@ registerChannelAdapter('wechat', {
           senderName: msg.from_user_id,
           isGroup,
         },
+        // iLink exposes no bot-mention metadata (shared personal account), so
+        // only DMs carry the platform mention signal; group messages leave
+        // isMention undefined and rely on the name-pattern default.
+        ...(isGroup ? {} : { isMention: true as const }),
+        isGroup,
         timestamp: new Date(msg.create_time_ms ?? Date.now()).toISOString(),
       };
 
@@ -159,6 +175,7 @@ registerChannelAdapter('wechat', {
       name: 'wechat',
       channelType: 'wechat',
       supportsThreads: false,
+      defaults: WECHAT_DEFAULTS,
 
       async setup(config: ChannelSetup) {
         setupConfig = config;
@@ -168,7 +185,6 @@ registerChannelAdapter('wechat', {
         client.on('message', (msg) => {
           try {
             onMessage(msg);
-            // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
           } catch (err) {
             log.warn('WeChat: onMessage error', { err });
           }
@@ -212,7 +228,6 @@ registerChannelAdapter('wechat', {
         try {
           const msgId = await client.sendText(to, text);
           return msgId;
-          // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
         } catch (err) {
           log.error('WeChat deliver failed', { platformId, err });
           return undefined;
@@ -222,4 +237,5 @@ registerChannelAdapter('wechat', {
 
     return adapter;
   },
+  defaults: WECHAT_DEFAULTS,
 });

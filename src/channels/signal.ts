@@ -13,7 +13,7 @@ import { createConnection, type Socket } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { ChannelAdapter, ChannelSetup, InboundMessage, OutboundMessage } from './adapter.js';
+import type { ChannelAdapter, ChannelDefaults, ChannelSetup, InboundMessage, OutboundMessage } from './adapter.js';
 import { registerChannelAdapter } from './channel-registry.js';
 import { readEnvFile } from '../env.js';
 import { log } from '../log.js';
@@ -28,23 +28,14 @@ interface DaemonHandle {
   isExited: () => boolean;
 }
 
-interface SignalRpcMessage {
-  id?: string;
-  error?: { message?: string };
-  result?: unknown;
-  method?: string;
-  params?: unknown;
-}
-
-function isSignalRpcMessage(value: unknown): value is SignalRpcMessage {
-  return typeof value === 'object' && value !== null;
-}
-
 function spawnSignalDaemon(cliPath: string, account: string, host: string, port: number): DaemonHandle {
   const args: string[] = [];
   if (account) args.push('-a', account);
   args.push('daemon', '--tcp', `${host}:${port}`, '--no-receive-stdout');
   args.push('--receive-mode', 'on-start');
+  // Send read receipts (in addition to signal-cli's default delivery receipts)
+  // so senders see their messages marked read once the daemon receives them.
+  args.push('--send-read-receipts');
 
   const child = spawn(cliPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   let exited = false;
@@ -192,16 +183,13 @@ class SignalTcpClient {
   }
 
   private handleLine(line: string) {
-    let parsed: unknown;
+    let parsed: any;
     try {
       parsed = JSON.parse(line);
-    } catch (err) {
-      if (!(err instanceof SyntaxError)) throw err;
+    } catch {
       log.debug('Signal TCP: unparseable line', { line: line.slice(0, 200) });
       return;
     }
-
-    if (!isSignalRpcMessage(parsed)) return;
 
     if (parsed.id && this.pending.has(parsed.id)) {
       const p = this.pending.get(parsed.id)!;
@@ -303,7 +291,7 @@ interface SignalQuote {
   text?: string;
 }
 
-interface SignalMention {
+export interface SignalMention {
   start?: number;
   length?: number;
   uuid?: string;
@@ -367,6 +355,23 @@ function resolveMentions(text: string, mentions?: SignalMention[]): string {
 }
 
 /**
+ * Platform mention signal for the router: DMs always engage (isMention=true);
+ * a group message counts as a mention only when the linked account itself is
+ * tagged. Returns undefined (not false) otherwise — the router treats
+ * undefined as "no platform signal" (see InboundMessage.isMention in
+ * adapter.ts). Matches both `number` and `uuid` against the configured
+ * account so either identifier shape works.
+ */
+export function computeSignalIsMention(
+  account: string,
+  isGroup: boolean,
+  mentions?: SignalMention[],
+): true | undefined {
+  if (!isGroup) return true;
+  return mentions?.some((m) => m.number === account || m.uuid === account) ? true : undefined;
+}
+
+/**
  * Optional voice-note transcription. Tries (in order):
  *   1. local whisper.cpp CLI when `WHISPER_BIN` is set
  *   2. OpenAI Whisper API when `OPENAI_API_KEY` is set
@@ -387,16 +392,12 @@ async function transcribeAudioOptional(filePath: string): Promise<string | null>
         encoding: 'utf-8',
         stdio: ['ignore', 'pipe', 'ignore'],
       });
-      for (const tempPath of [wavPath, `${wavPath}.txt`]) {
-        try {
-          unlinkSync(tempPath);
-        } catch (err) {
-          if (!(err instanceof Error && 'code' in err && err.code === 'ENOENT')) throw err;
-        }
-      }
+      try {
+        unlinkSync(wavPath);
+        unlinkSync(`${wavPath}.txt`);
+      } catch {}
       const text = out.replace(/\[[^\]]*\]/g, '').trim();
       if (text) return text;
-      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch (err) {
       log.debug('Signal: local whisper transcription failed, trying OpenAI', { err });
     }
@@ -426,7 +427,6 @@ async function transcribeAudioOptional(filePath: string): Promise<string | null>
         const json = (await res.json()) as { text?: string };
         if (json.text) return json.text.trim();
       }
-      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch (err) {
       log.debug('Signal: OpenAI transcription failed', { err });
     }
@@ -556,10 +556,7 @@ export function createSignalAdapter(config: {
 
   function handleNotification(method: string, params: unknown): void {
     if (method === 'receive') {
-      const envelope =
-        typeof params === 'object' && params !== null && 'envelope' in params
-          ? (params.envelope as SignalEnvelope | undefined)
-          : undefined;
+      const envelope = (params as any)?.envelope;
       if (envelope) {
         handleEnvelope(envelope).catch((err) => {
           log.error('Signal: error handling envelope', { err });
@@ -596,6 +593,9 @@ export function createSignalAdapter(config: {
             isFromMe: true,
             ...(syncSent.quote ? quoteToContent(syncSent.quote) : {}),
           },
+          // Note-to-self is a DM with ourselves: same DM→mention rule.
+          isMention: true,
+          isGroup: false,
           timestamp,
         };
         await setup.onInbound(platformId, null, msg);
@@ -693,6 +693,8 @@ export function createSignalAdapter(config: {
         ...(attachmentRefs.length > 0 ? { attachments: attachmentRefs } : {}),
         ...(dataMessage.quote ? quoteToContent(dataMessage.quote) : {}),
       },
+      isMention: computeSignalIsMention(config.account, isGroup, dataMessage.mentions),
+      isGroup,
       timestamp,
     };
     await setup.onInbound(platformId, null, msg);
@@ -759,7 +761,6 @@ export function createSignalAdapter(config: {
             throw styledErr;
           }
         }
-        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch (err) {
         log.error('Signal: send failed', { platformId, err });
       }
@@ -800,14 +801,12 @@ export function createSignalAdapter(config: {
       }
       await tcp.rpc('send', params);
       log.info('Signal attachments sent', { platformId, count: files.length, filenames: files.map((f) => f.filename) });
-      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch (err) {
       log.error('Signal: attachment send failed', { platformId, count: files.length, err });
     } finally {
       for (const p of tempPaths) {
         try {
           unlinkSync(p);
-          // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
         } catch {
           /* best-effort cleanup */
         }
@@ -835,6 +834,7 @@ export function createSignalAdapter(config: {
     name: 'signal',
     channelType: 'signal',
     supportsThreads: false,
+    defaults: SIGNAL_DEFAULTS,
 
     async setup(cfg: ChannelSetup): Promise<void> {
       setup = cfg;
@@ -852,7 +852,7 @@ export function createSignalAdapter(config: {
           const err = new Error(
             `Signal daemon not reachable at ${config.tcpHost}:${config.tcpPort}. Start it manually or set SIGNAL_MANAGE_DAEMON=true`,
           );
-          err.name = 'NetworkError';
+          (err as any).name = 'NetworkError';
           throw err;
         }
       }
@@ -880,7 +880,6 @@ export function createSignalAdapter(config: {
           name: 'NanoClaw',
           account: config.account,
         });
-        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch {
         log.debug('Signal: could not set profile name');
       }
@@ -890,7 +889,6 @@ export function createSignalAdapter(config: {
           typingIndicators: true,
           account: config.account,
         });
-        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch {
         log.debug('Signal: could not enable typing indicators');
       }
@@ -946,7 +944,6 @@ export function createSignalAdapter(config: {
         const params: Record<string, unknown> = { recipient: [platformId] };
         if (config.account) params.account = config.account;
         await tcp.rpc('sendTyping', params);
-        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch (err) {
         log.debug('Signal: typing indicator failed', { platformId, err });
       }
@@ -962,6 +959,20 @@ export function createSignalAdapter(config: {
 
 const DEFAULT_TCP_HOST = '127.0.0.1';
 const DEFAULT_TCP_PORT = 7583;
+
+/**
+ * Linked personal account, so auto-create is 'strict'. The adapter emits
+ * top-level isGroup and isMention (DM→true; group→dataMessage.mentions
+ * matched against config.account via computeSignalIsMention), so platform
+ * mention wirings can fire. Group default is 'mention', never 'mention-sticky':
+ * Signal is non-threaded and sessions are never deleted, so sticky in the
+ * single shared session would mean engaged-forever.
+ */
+const SIGNAL_DEFAULTS: ChannelDefaults = {
+  dm: { engageMode: 'pattern', engagePattern: '.', threads: false, unknownSenderPolicy: 'strict' },
+  group: { engageMode: 'mention', threads: false, unknownSenderPolicy: 'strict' },
+  mentions: 'platform',
+};
 
 registerChannelAdapter('signal', {
   factory: () => {
@@ -994,7 +1005,6 @@ registerChannelAdapter('signal', {
     if (manageDaemon && cliPath === 'signal-cli') {
       try {
         execFileSync('which', ['signal-cli'], { stdio: 'ignore' });
-        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch {
         log.debug('Signal: signal-cli binary not found, skipping channel');
         return null;
@@ -1010,4 +1020,5 @@ registerChannelAdapter('signal', {
       signalDataDir,
     });
   },
+  defaults: SIGNAL_DEFAULTS,
 });

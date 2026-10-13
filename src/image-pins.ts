@@ -120,7 +120,7 @@ const hostRuntime: ImagePinRuntime = {
 };
 
 export async function reconcileImagePins(): Promise<void> {
-  const desired = desiredImagePins(getAllContainerConfigs(), CONTAINER_IMAGE, INSTALL_SLUG);
+  const desired = desiredImagePins(await getAllContainerConfigs(), CONTAINER_IMAGE, INSTALL_SLUG);
   const result = await reconcileImagePinsWith(desired, hostRuntime);
   if (result.missingImages.includes(CONTAINER_IMAGE)) {
     throw new Error(`NanoClaw base image is missing: ${CONTAINER_IMAGE}`);

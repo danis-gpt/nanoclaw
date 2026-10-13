@@ -88,7 +88,7 @@ function readImports(file: string): string[] {
 
 export function detectInstalledSkills(root: string): InstalledSkill[] {
   const channels = readImports(path.join(root, 'src/channels/index.ts'))
-    .filter((name) => name !== 'cli')
+    .filter((name) => name !== 'cli' && name !== 'slack-a2a-guard')
     .map((name) => ({ name, skillName: `add-${name}`, kind: 'channel' as const }));
   const providers = new Set([
     ...readImports(path.join(root, 'src/providers/index.ts')),

@@ -49,7 +49,6 @@ export {
   getSessionsByAgentGroup,
   getActiveSessions,
   getRunningSessions,
-  markRunningSessionsStopped,
   updateSession,
   deleteSession,
   createPendingQuestion,

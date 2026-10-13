@@ -13,12 +13,25 @@
  *   MATRIX_RECOVERY_KEY         — enable E2EE cross-signing
  *   MATRIX_DEVICE_ID            — stable device ID across restarts
  */
-import type { Adapter } from 'chat';
+import { createMatrixAdapter } from '@beeper/chat-adapter-matrix';
 
 import { log } from '../log.js';
 import { readEnvFile } from '../env.js';
+import type { ChannelDefaults } from './adapter.js';
 import { createChatSdkBridge } from './chat-sdk-bridge.js';
 import { registerChannelAdapter } from './channel-registry.js';
+
+/**
+ * Assumes a dedicated bot account on a homeserver (the common install).
+ * Non-threaded at the bridge level, so group engagement is 'mention', never
+ * sticky. Personal-account installs should edit their copy to dm 'strict' —
+ * install-wide changes live in this declaration by design.
+ */
+const MATRIX_DEFAULTS: ChannelDefaults = {
+  dm: { engageMode: 'pattern', engagePattern: '.', threads: false, unknownSenderPolicy: 'request_approval' },
+  group: { engageMode: 'mention', threads: false, unknownSenderPolicy: 'request_approval' },
+  mentions: 'platform',
+};
 
 const ENV_KEYS = [
   'MATRIX_BASE_URL',
@@ -32,25 +45,6 @@ const ENV_KEYS = [
   'MATRIX_INVITE_AUTOJOIN',
   'MATRIX_INVITE_AUTOJOIN_ALLOWLIST',
 ] as const;
-
-interface MatrixRoomInternals {
-  getJoinedMemberCount(): number;
-  getJoinedMembers(): Array<{ userId: string }>;
-}
-
-interface MatrixClientInternals {
-  getRoom(roomId: string): MatrixRoomInternals | undefined;
-}
-
-type MatrixAdapterInternals = Adapter & {
-  client?: MatrixClientInternals;
-  userID?: string;
-  isDM?: (threadId: string) => boolean;
-};
-
-type MatrixAdapter = Adapter<{ roomID: string; rootEventID?: string }> & {
-  openDM(userHandle: string): Promise<string>;
-};
 
 /**
  * Wrap the Matrix adapter so DM conversations are identified by user handle
@@ -68,7 +62,7 @@ type MatrixAdapter = Adapter<{ roomID: string; rootEventID?: string }> & {
  *
  * Both resolutions are cached for the process lifetime.
  */
-function wrapWithDmResolution(adapter: MatrixAdapter): MatrixAdapter {
+function wrapWithDmResolution(adapter: ReturnType<typeof createMatrixAdapter>): typeof adapter {
   const origPostMessage = adapter.postMessage.bind(adapter);
   const origStartTyping = adapter.startTyping.bind(adapter);
   const origChannelIdFromThreadId = adapter.channelIdFromThreadId.bind(adapter);
@@ -80,7 +74,6 @@ function wrapWithDmResolution(adapter: MatrixAdapter): MatrixAdapter {
     try {
       const { roomID } = adapter.decodeThreadId(threadId);
       return !roomID.startsWith('!');
-      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch {
       return true;
     }
@@ -96,7 +89,6 @@ function wrapWithDmResolution(adapter: MatrixAdapter): MatrixAdapter {
     try {
       const { roomID } = adapter.decodeThreadId(resolved);
       roomToUserCache.set(roomID, userHandle);
-      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch {
       // decode failure is non-fatal — outbound still works
     }
@@ -115,19 +107,17 @@ function wrapWithDmResolution(adapter: MatrixAdapter): MatrixAdapter {
       if (cached) return `matrix:${cached}`;
 
       // Not cached — check if this is a DM by membership count
-      const matrixAdapter = adapter as MatrixAdapterInternals;
-      const client = matrixAdapter.client;
+      const client = (adapter as any).client;
       const room = client?.getRoom(roomID);
       if (!room) return origChannelIdFromThreadId(threadId);
       if (room.getJoinedMemberCount() > 2) return origChannelIdFromThreadId(threadId);
 
-      const botId = matrixAdapter.userID;
+      const botId = (adapter as any).userID;
       const otherMember = room.getJoinedMembers().find((m: { userId: string }) => m.userId !== botId);
       if (!otherMember) return origChannelIdFromThreadId(threadId);
 
       roomToUserCache.set(roomID, otherMember.userId);
       return `matrix:${otherMember.userId}`;
-      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch {
       return origChannelIdFromThreadId(threadId);
     }
@@ -137,17 +127,15 @@ function wrapWithDmResolution(adapter: MatrixAdapter): MatrixAdapter {
   // to dispatch to onDirectMessage handlers. The Matrix adapter doesn't expose
   // this method — it only has an async isDirectRoom(). We add a synchronous
   // isDM that checks room membership count: 2 members = DM.
-  const matrixAdapter = adapter as MatrixAdapterInternals;
-  matrixAdapter.isDM = (threadId: string): boolean => {
+  (adapter as any).isDM = (threadId: string): boolean => {
     try {
       const { roomID } = adapter.decodeThreadId(threadId);
-      const client = matrixAdapter.client;
+      const client = (adapter as any).client;
       if (!client) return false;
       const room = client.getRoom(roomID);
       if (!room) return false;
       const members = room.getJoinedMemberCount();
       return members <= 2;
-      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch {
       return false;
     }
@@ -170,7 +158,7 @@ function wrapWithDmResolution(adapter: MatrixAdapter): MatrixAdapter {
 }
 
 registerChannelAdapter('matrix', {
-  factory: async () => {
+  factory: () => {
     const env = readEnvFile([...ENV_KEYS]);
     if (!env.MATRIX_BASE_URL) return null;
     if (!env.MATRIX_ACCESS_TOKEN && !(env.MATRIX_USERNAME && env.MATRIX_PASSWORD)) return null;
@@ -184,9 +172,13 @@ registerChannelAdapter('matrix', {
       process.env.MATRIX_INVITE_AUTOJOIN = 'true';
     }
 
-    const { createMatrixAdapter } = await import('@beeper/chat-adapter-matrix');
     const matrixAdapter = wrapWithDmResolution(createMatrixAdapter());
-    const bridge = createChatSdkBridge({ adapter: matrixAdapter, concurrency: 'concurrent', supportsThreads: false });
+    const bridge = createChatSdkBridge({
+      adapter: matrixAdapter,
+      concurrency: 'concurrent',
+      supportsThreads: false,
+      defaults: MATRIX_DEFAULTS,
+    });
 
     // Matrix user IDs contain ":" (e.g. "@user:matrix.org") which the shared
     // permissions module interprets as already-prefixed. Wrap onInbound to
@@ -229,4 +221,5 @@ registerChannelAdapter('matrix', {
 
     return bridge;
   },
+  defaults: MATRIX_DEFAULTS,
 });

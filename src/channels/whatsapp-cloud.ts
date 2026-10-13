@@ -6,10 +6,22 @@
 import { createWhatsAppAdapter } from '@chat-adapter/whatsapp';
 
 import { readEnvFile } from '../env.js';
+import type { ChannelDefaults, ChannelRegistration } from './adapter.js';
 import { createChatSdkBridge } from './chat-sdk-bridge.js';
 import { registerChannelAdapter } from './channel-registry.js';
 
-registerChannelAdapter('whatsapp-cloud', {
+/**
+ * Dedicated business number on the official Cloud API — non-threaded, so
+ * group engagement defaults to 'mention' (never sticky: one shared session
+ * would stay engaged forever).
+ */
+const WHATSAPP_CLOUD_DEFAULTS: ChannelDefaults = {
+  dm: { engageMode: 'pattern', engagePattern: '.', threads: false, unknownSenderPolicy: 'request_approval' },
+  group: { engageMode: 'mention', threads: false, unknownSenderPolicy: 'request_approval' },
+  mentions: 'platform',
+};
+
+export const whatsappCloudRegistration: ChannelRegistration = {
   factory: () => {
     const env = readEnvFile([
       'WHATSAPP_ACCESS_TOKEN',
@@ -24,6 +36,21 @@ registerChannelAdapter('whatsapp-cloud', {
       appSecret: env.WHATSAPP_APP_SECRET,
       verifyToken: env.WHATSAPP_VERIFY_TOKEN,
     });
-    return createChatSdkBridge({ adapter: whatsappAdapter, concurrency: 'concurrent', supportsThreads: false });
+    // `@chat-adapter/whatsapp` hardcodes name = 'whatsapp', which the bridge
+    // uses as channelType. Without a distinct instance the registry would key
+    // this bridge under 'whatsapp' and collide with the native Baileys adapter
+    // (src/channels/whatsapp.ts, also channelType 'whatsapp') — last-write-wins
+    // silently kills one channel. The instance key keeps them apart while
+    // channelType stays 'whatsapp' (the semantic platform key). See #2911.
+    return createChatSdkBridge({
+      adapter: whatsappAdapter,
+      instance: 'whatsapp-cloud',
+      concurrency: 'concurrent',
+      supportsThreads: false,
+      defaults: WHATSAPP_CLOUD_DEFAULTS,
+    });
   },
-});
+  defaults: WHATSAPP_CLOUD_DEFAULTS,
+};
+
+registerChannelAdapter('whatsapp-cloud', whatsappCloudRegistration);

@@ -21,7 +21,8 @@ import { basename, join, resolve } from 'path';
 import { getDb, hasTable } from '../db/connection.js';
 import { readEnvFile } from '../env.js';
 import { log } from '../log.js';
-import type { ChannelAdapter, ChannelSetup, OutboundMessage } from './adapter.js';
+import { isGlobalAdmin, isOwner } from '../modules/permissions/db/user-roles.js';
+import type { ChannelAdapter, ChannelDefaults, ChannelSetup, OutboundMessage } from './adapter.js';
 import { registerChannelAdapter } from './channel-registry.js';
 
 import { DeltaChatOverJsonRpc } from '@deltachat/stdio-rpc-server';
@@ -39,22 +40,11 @@ const OPTIONAL_ENV = ['DC_IMAP_SECURITY', 'DC_SMTP_SECURITY'] as const;
 
 type DcEnv = { [K in (typeof REQUIRED_ENV)[number]]: string } & { [K in (typeof OPTIONAL_ENV)[number]]?: string };
 
-function isDcAdmin(userId: string): boolean {
+async function isDcAdmin(userId: string): Promise<boolean> {
   try {
     const db = getDb();
-    if (!hasTable(db, 'user_roles')) return true;
-    return (
-      db
-        .prepare(
-          `SELECT 1 FROM user_roles
-       WHERE user_id = ?
-         AND (role = 'owner' OR role = 'admin')
-         AND agent_group_id IS NULL
-       LIMIT 1`,
-        )
-        .get(userId) != null
-    );
-    // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
+    if (!(await hasTable(db, 'user_roles'))) return true;
+    return (await isOwner(userId)) || (await isGlobalAdmin(userId));
   } catch {
     return false;
   }
@@ -77,7 +67,6 @@ function createAdapter(env: DcEnv): ChannelAdapter {
       await dc.rpc.startIo(accountId);
       lastImapIdleTs = Date.now();
       consecutiveBadChecks = 0;
-      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch (err) {
       log.error('DeltaChat: IO restart failed', { err });
     }
@@ -87,6 +76,7 @@ function createAdapter(env: DcEnv): ChannelAdapter {
     name: 'deltachat',
     channelType: 'deltachat',
     supportsThreads: false,
+    defaults: DELTACHAT_DEFAULTS,
 
     async setup(config: ChannelSetup): Promise<void> {
       const accountDir = process.env.DC_ACCOUNT_DIR ?? 'dc-account';
@@ -147,14 +137,13 @@ function createAdapter(env: DcEnv): ChannelAdapter {
           if (/^\/set-avatar$/i.test((msg.text || '').trim()) && msg.file) {
             const userId = `deltachat:${contact.address}`;
             try {
-              if (isDcAdmin(userId)) {
+              if (await isDcAdmin(userId)) {
                 const absPath = resolve(msg.file as string);
                 await dc.rpc.setConfig(accountId, 'selfavatar', absPath);
                 await dc.rpc.sendMsg(accountId, event.chatId, { text: 'Avatar updated.' });
               } else {
                 await dc.rpc.sendMsg(accountId, event.chatId, { text: 'Permission denied.' });
               }
-              // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
             } catch (avatarErr: unknown) {
               log.error('DeltaChat: failed to set avatar', {
                 err: avatarErr instanceof Error ? avatarErr.message : JSON.stringify(avatarErr),
@@ -188,7 +177,6 @@ function createAdapter(env: DcEnv): ChannelAdapter {
             isGroup,
             isMention: !isGroup,
           });
-          // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
         } catch (err: unknown) {
           log.error('DeltaChat: error handling incoming message', {
             err: err instanceof Error ? err.message : JSON.stringify(err),
@@ -204,7 +192,6 @@ function createAdapter(env: DcEnv): ChannelAdapter {
         if (contextId !== accountId) return;
         try {
           connectivity = await dc.rpc.getConnectivity(accountId);
-          // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
         } catch {
           /* ignore */
         }
@@ -213,7 +200,6 @@ function createAdapter(env: DcEnv): ChannelAdapter {
       await dc.rpc.startIo(accountId);
       try {
         connectivity = await dc.rpc.getConnectivity(accountId);
-        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch {
         /* ignore */
       }
@@ -229,7 +215,6 @@ function createAdapter(env: DcEnv): ChannelAdapter {
         const svgPath = join(accountDir, 'invite-qr.svg');
         writeFileSync(svgPath, svg);
         log.info('DeltaChat: invite link — open URL in DeltaChat app or scan ' + svgPath, { url: inviteUrl });
-        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch (err: unknown) {
         log.warn('DeltaChat: could not generate invite link', {
           err: err instanceof Error ? err.message : JSON.stringify(err),
@@ -254,7 +239,6 @@ function createAdapter(env: DcEnv): ChannelAdapter {
             if (idleAgeMin > 20) {
               await restartIo(`no IMAP IDLE in ${idleAgeMin.toFixed(0)}min`);
             }
-            // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
           } catch (err: unknown) {
             log.warn('DeltaChat: watchdog error', {
               err: err instanceof Error ? err.message : String(err),
@@ -269,7 +253,6 @@ function createAdapter(env: DcEnv): ChannelAdapter {
         async () => {
           try {
             await dc.rpc.maybeNetwork();
-            // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
           } catch {
             /* ignore */
           }
@@ -283,13 +266,11 @@ function createAdapter(env: DcEnv): ChannelAdapter {
       if (networkTimer) clearInterval(networkTimer);
       try {
         await dc?.rpc.stopIo(accountId);
-        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch {
         /* ignore */
       }
       try {
         dc?.close();
-        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch {
         /* ignore */
       }
@@ -340,10 +321,27 @@ function createAdapter(env: DcEnv): ChannelAdapter {
   return adapter;
 }
 
+/**
+ * Dedicated email identity (DC_EMAIL), so request_approval is sound. Email
+ * carries no mention metadata ('dm-only'; the adapter flags DMs only), so
+ * group wirings default to a name-pattern trigger.
+ */
+const DELTACHAT_DEFAULTS: ChannelDefaults = {
+  dm: { engageMode: 'pattern', engagePattern: '.', threads: false, unknownSenderPolicy: 'request_approval' },
+  group: {
+    engageMode: 'pattern',
+    engagePattern: '\\b{name}\\b',
+    threads: false,
+    unknownSenderPolicy: 'request_approval',
+  },
+  mentions: 'dm-only',
+};
+
 registerChannelAdapter('deltachat', {
   factory: () => {
     const env = readEnvFile([...REQUIRED_ENV, ...OPTIONAL_ENV]);
     if (!env.DC_EMAIL || !env.DC_PASSWORD) return null;
     return createAdapter(env as DcEnv);
   },
+  defaults: DELTACHAT_DEFAULTS,
 });
