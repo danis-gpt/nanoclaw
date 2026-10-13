@@ -52,6 +52,9 @@ importers:
       '@deltachat/stdio-rpc-server':
         specifier: 2.49.0
         version: 2.49.0(@deltachat/jsonrpc-client@2.63.0(ws@8.22.0))
+      '@onecli-sh/sdk':
+        specifier: 2.2.1
+        version: 2.2.1
       '@resend/chat-sdk-adapter':
         specifier: 0.1.1
         version: 0.1.1(@chat-adapter/shared@4.29.0)(chat@4.29.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -841,6 +844,10 @@ packages:
 
   '@octokit/types@18.0.0':
     resolution: {integrity: sha512-l6bAF43PNxkJp6g+W4PjoUSSkxHomXw2nOum5CTftJz1NlV3vu93NImgOYtLf6CbBUb5j+fiuzW0PPQ5JTSvZA==}
+
+  '@onecli-sh/sdk@2.2.1':
+    resolution: {integrity: sha512-q2mCW4ZsARlLEoTxz/P0NQ4MiCh7Z2n28pxkSc7srS+tozyw40PdTnWYW7NI8hfSYplZTx5856Adq1iPi4KN3Q==}
+    engines: {node: '>=20'}
 
   '@opentelemetry/api@1.9.1':
     resolution: {integrity: sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q==}
@@ -4126,6 +4133,8 @@ snapshots:
   '@octokit/types@18.0.0':
     dependencies:
       '@octokit/openapi-types': 29.0.1
+
+  '@onecli-sh/sdk@2.2.1': {}
 
   '@opentelemetry/api@1.9.1': {}
 
