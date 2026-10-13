@@ -7,7 +7,7 @@ import { Readable, Writable } from 'stream';
 import { afterEach, describe, expect, it } from 'bun:test';
 
 import { MEMORY_SESSION_HOOK } from '../memory/session-hook.js';
-import { buildNativeCodexLaunch, buildPrompt, CodexProvider, runNativeCodex, type SpawnCodex } from './codex.js';
+import { buildNativeCodexLaunch, buildPrompt, CodexProvider, runNativeCodex, type SpawnCodex } from './codex-native.js';
 
 interface FakeRun {
   code: number;

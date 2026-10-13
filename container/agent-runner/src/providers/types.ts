@@ -153,6 +153,8 @@ export interface AgentQuery {
   abort(): void;
 }
 
+export interface ProviderFile { filename: string; dataBase64: string; }
+
 export type ProviderEvent =
   | { type: 'init'; continuation: string }
   /**
@@ -161,7 +163,7 @@ export type ProviderEvent =
    * (e.g. a billing/quota notice), kept separate from model scratchpad and
    * raw diagnostics. Failures without `error` receive a generic notice.
    */
-  | { type: 'result'; text: string | null; isError?: boolean; error?: string }
+  | { type: 'result'; files?: ProviderFile[]; text: string | null; isError?: boolean; error?: string }
   /**
    * An assistant text segment emitted mid-turn (e.g. between tool calls).
    * The SDK's final `result` carries only the LAST assistant text, so a

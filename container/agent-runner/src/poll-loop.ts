@@ -1,3 +1,8 @@
+import { loadConfig } from './config.js';
+import { createIdleTracker } from './idle-tracker.js';
+import fs from 'fs';
+import path from 'path';
+import type { ProviderFile } from './providers/types.js';
 import { findByName, getAllDestinations, type DestinationEntry } from './destinations.js';
 import {
   getPendingMessages,
@@ -121,10 +126,13 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
   // Same for the reply stamp a killed container left behind (see session-state.ts).
   clearCurrentReplyRoute();
 
+  const { idleTimeoutMs } = loadConfig();
+  const idle = createIdleTracker(idleTimeoutMs);
   let pollCount = 0;
   let isFirstPoll = true;
   while (true) {
     if (config.signal?.aborted) return;
+    if (idle.shouldExit()) return;
     // Skip system messages — they're responses for MCP tools (e.g., ask_user_question)
     const messages = getPendingMessages(isFirstPoll).filter((m) => m.kind !== 'system');
     isFirstPoll = false;
@@ -228,6 +236,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // MODULE-HOOK:scheduling-pre-task:end
 
     if (keep.length === 0) {
+      idle.markActivity();
       log(`All ${normalMessages.length} non-command message(s) gated by script, skipping query`);
       continue;
     }
@@ -238,6 +247,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
 
     log(`Processing ${keep.length} message(s), kinds: ${[...new Set(keep.map((m) => m.kind))].join(',')}`);
 
+    idle.markActivity();
     const query = config.provider.query({
       prompt,
       continuation,
@@ -608,9 +618,10 @@ export async function processQuery(
         markCompleted(initialBatchIds);
         const resultText = event.text ?? '';
         const failed = event.isError === true;
-        if (resultText || failed) {
+        if (resultText || failed || event.files?.length) {
           const { hasUnwrapped, taskBlocks } = await dispatchResultText(resultText, routing, {
             midTurnSent,
+            files: event.files,
             // For mid-turn delivery providers the result door NEVER delivers
             // content: mid-turn streaming is
             // the single content door. The result door's remaining job is
@@ -691,7 +702,10 @@ export async function processQuery(
         midTurnTail = '';
         const next = queuedTurns.shift();
         if (next) adoptTurn(next);
-        else answering = false;
+        else {
+          answering = false;
+          if (loadConfig().idleTimeoutMs > 0) query.end();
+        }
       }
     }
   } catch (err) {
@@ -816,6 +830,7 @@ export interface TaskMessageBlock {
 
 /** Options for `dispatchResultText`, describing the turn it closes. */
 export interface ResultDispatchOptions {
+  files?: ProviderFile[];
   /**
    * How many <message> blocks were already delivered from streamed text
    * events this turn. Folds into the returned `sent` total so a bare final
@@ -942,7 +957,7 @@ export async function deliverMidTurnBlocks(
       log(`Mid-turn <message to="${toName}"> is a verbatim repeat of a message already sent this turn — skipped`);
       continue;
     }
-    await sendToDestination(dest, body, routing);
+    await sendToDestination(dest, body, routing, sent === 0 ? options?.files : []);
     delivered++;
     log(`Mid-turn delivery: <message to="${toName}"> (${body.length} chars)`);
   }
@@ -1133,7 +1148,7 @@ export async function dispatchResultText(
       }
       continue;
     }
-    await sendToDestination(dest, body, routing);
+    await sendToDestination(dest, body, routing, sent === 0 ? options?.files : []);
     sent++;
   }
   if (lastIndex < text.length) {
@@ -1217,7 +1232,9 @@ export async function autoAppendTaskLog(text: string): Promise<void> {
   log('Task run log auto-appended from final text');
 }
 
-async function sendToDestination(dest: DestinationEntry, body: string, routing: RoutingContext): Promise<void> {
+async function sendToDestination(dest: DestinationEntry, body: string, routing: RoutingContext, files: ProviderFile[] = []): Promise<void> {
+  const id = generateId();
+  const filenames = writeOutboxFiles(id, files);
   const platformId = dest.type === 'channel' ? dest.platformId! : dest.agentGroupId!;
   const channelType = dest.type === 'channel' ? dest.channelType! : 'agent';
   // Thread per destination: the batch's own thread when the destination is the
@@ -1227,13 +1244,13 @@ async function sendToDestination(dest: DestinationEntry, body: string, routing: 
   // thread onto another.
   const destRouting = resolveDestinationThread(channelType, platformId, routing);
   await writeMessageOut({
-    id: generateId(),
+    id,
     in_reply_to: destRouting?.inReplyTo ?? routing.inReplyTo,
     kind: 'chat',
     platform_id: platformId,
     channel_type: channelType,
     thread_id: destRouting?.threadId ?? null,
-    content: JSON.stringify({ text: body }),
+    content: JSON.stringify(buildContent(body, filenames)),
   });
 }
 
@@ -1254,3 +1271,53 @@ function publishReplyRoute(routing: RoutingContext): void {
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+function buildContent(text: string, files: string[]): { text: string; files?: string[] } {
+  return files.length > 0 ? { text, files } : { text };
+}
+
+function writeOutboxFiles(messageId: string, files: ProviderFile[]): string[] {
+  if (files.length === 0) return [];
+  const outboxDir = path.join('/workspace/outbox', messageId);
+  fs.mkdirSync(outboxDir, { recursive: true });
+
+  const used = new Set<string>();
+  const written: string[] = [];
+  for (const file of files) {
+    const filename = uniqueFilename(safeFilename(file.filename), used);
+    const bytes = Buffer.from(file.dataBase64, 'base64');
+    if (bytes.length === 0) continue;
+    fs.writeFileSync(path.join(outboxDir, filename), bytes);
+    written.push(filename);
+  }
+  return written;
+}
+
+function safeFilename(filename: string): string {
+  const base = path
+    .basename(filename)
+    .replace(/[^\w.()+ -]/g, '_')
+    .trim();
+  return base || `codex-file-${Date.now()}`;
+}
+
+function uniqueFilename(filename: string, used: Set<string>): string {
+  if (!used.has(filename)) {
+    used.add(filename);
+    return filename;
+  }
+  const ext = path.extname(filename);
+  const stem = ext ? filename.slice(0, -ext.length) : filename;
+  for (let i = 2; ; i++) {
+    const candidate = `${stem}-${i}${ext}`;
+    if (!used.has(candidate)) {
+      used.add(candidate);
+      return candidate;
+    }
+  }
+}
+
+/**
+ * Find the thread_id and message id from the most recent inbound message
+ * matching the given channel+platform. Returns null if no match found.
+ */

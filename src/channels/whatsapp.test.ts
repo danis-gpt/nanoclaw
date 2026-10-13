@@ -86,17 +86,17 @@ describe('isBotMentionedInGroup (#2560)', () => {
 
 describe('InboundMessage.isMention semantics (#2560)', () => {
   it('is undefined for a group message with no bot mention', () => {
-    expect(computeIsMention(true, false)).toBeUndefined();
+    expect(computeIsMention(false, true, false)).toBeUndefined();
   });
 
   it('is true for a group message where the bot is mentioned', () => {
-    expect(computeIsMention(true, true)).toBe(true);
+    expect(computeIsMention(false, true, true)).toBe(true);
   });
 
   it('is true for a DM regardless of mention state', () => {
     // DMs are unconditionally mentions — the helper isn't consulted there.
-    expect(computeIsMention(false, false)).toBe(true);
-    expect(computeIsMention(false, true)).toBe(true);
+    expect(computeIsMention(false, false, false)).toBe(true);
+    expect(computeIsMention(false, false, true)).toBe(true);
   });
 });
 

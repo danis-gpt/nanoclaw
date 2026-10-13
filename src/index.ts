@@ -24,6 +24,7 @@ import { startGatewayApprovalCoordinator, stopGatewayApprovalCoordinator } from 
 import { startGatewayAvailabilityMonitor } from './gateway-availability.js';
 import { getGatewayProvider } from './gateway-providers/index.js';
 import { routeInbound } from './router.js';
+import { reconcileImagePins } from './image-pins.js';
 import { log } from './log.js';
 import { enforceUpgradeTripwire } from './upgrade-state.js';
 
@@ -95,6 +96,7 @@ async function main(): Promise<void> {
 
   // Prepare the runtime; inbound routing waits until approval health and adoption are ready.
   await getSessionDriver().ensureReady?.();
+  await reconcileImagePins();
   await startHostInstanceLease();
   let releaseInbound!: () => void;
   const inboundReady = new Promise<void>((resolve) => {

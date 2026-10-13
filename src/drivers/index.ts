@@ -36,6 +36,8 @@
  * would be silently ignored when written to the file where every other
  * NanoClaw setting lives.
  */
+import { CONTAINER_RUNTIME_BIN } from '../container-runtime.js';
+import { realCli } from './cli.js';
 import os from 'os';
 import path from 'path';
 
@@ -83,6 +85,7 @@ function dockerNetworkArgs(spec: SessionSpec): string[] {
     log.info('Egress lockdown active', { containerName: agentContainerName(spec), network: EGRESS_NETWORK });
     return egressNetworkArgs();
   }
+  if (CONTAINER_RUNTIME_BIN === 'podman') return ['--network', 'host'];
   return os.platform() === 'linux' ? [`--add-host=${spec.networkAccess.endpoint}:host-gateway`] : [];
 }
 
@@ -91,6 +94,7 @@ registerSessionDriver(
   (policy) =>
     new DockerSessionDriver({
       ...policy,
+      cli: realCli(CONTAINER_RUNTIME_BIN),
       networkArgsFor: dockerNetworkArgs,
       reconcileNetworkAccess: (access) => {
         if (access.target.kind !== 'session-container') ensureEgressNetwork(access);
