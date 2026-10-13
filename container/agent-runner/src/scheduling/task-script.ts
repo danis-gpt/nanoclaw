@@ -27,6 +27,7 @@ export async function runScript(
   script: string,
   taskId: string,
   timeoutMs: number = SCRIPT_TIMEOUT_MS,
+  workingDirectory: string = fs.existsSync('/workspace/agent') ? '/workspace/agent' : process.cwd(),
 ): Promise<ScriptResult | null> {
   const scriptPath = path.join('/tmp', `task-script-${taskId}.sh`);
   fs.writeFileSync(scriptPath, script, { mode: 0o755 });
@@ -35,7 +36,7 @@ export async function runScript(
     // Bash forks the last command of a script file instead of exec'ing it, so
     // killing bash alone orphans that child and its side effects still land.
     // Run the script in its own process group and kill the whole group.
-    const child = spawn('bash', [scriptPath], { detached: true, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('bash', [scriptPath], { cwd: workingDirectory, detached: true, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
 
     const out = { stdout: [] as Buffer[], stderr: [] as Buffer[] };
     const bytes = { stdout: 0, stderr: 0 };

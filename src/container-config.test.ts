@@ -91,7 +91,7 @@ describe('resolveGroupTimezone', () => {
     expect(configFromDb({ ...row, runtime_tier: null }, GROUP).runtimeTier).toBeUndefined();
   });
 
-  it('persists and materializes a per-group clean idle timeout', () => {
+  it('persists and materializes a per-group clean idle timeout', async () => {
     await updateContainerConfigScalars(GROUP.id, { idle_timeout_ms: 300_000 });
 
     const row = (await getContainerConfig(GROUP.id))!;
