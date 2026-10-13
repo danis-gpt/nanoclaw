@@ -1,170 +1,49 @@
+/**
+ * Host-side container config for the `codex` provider.
+ *
+ * Codex reads auth and MCP config from ~/.codex. We give each session its
+ * own private copy of that directory so:
+ *
+ * - The user's host ~/.codex/auth.json reaches the container without us
+ *   touching their host config.toml (which the host's own `codex` CLI
+ *   might be using).
+ * - The in-container provider can rewrite config.toml freely on every
+ *   wake with container-appropriate MCP server paths, without racing
+ *   other sessions or leaking per-session paths back to the host.
+ *
+ * Env passthrough covers the two knobs that are read at runtime:
+ *   OPENAI_API_KEY  — fallback auth when auth.json isn't a subscription token
+ *   CODEX_MODEL     — model override if the user wants something other than the default
+ *   OPENAI_BASE_URL — rare, but supports API-compatible alternates
+ */
 import fs from 'fs';
 import path from 'path';
-import crypto from 'crypto';
 
-import {
-  CODEX_AGENT_HOME,
-  CODEX_AUTO_ESCALATION,
-  CODEX_AUTO_ESCALATION_LONG_PROMPT_CHARS,
-  CODEX_AUTO_ESCALATION_MIN_SCORE,
-  CODEX_BROKER_GRANTS_DIR,
-  CODEX_BROKER_SOCKET,
-  CODEX_DEFAULT_MODEL,
-  CODEX_ESCALATION_MODEL,
-  CODEX_HOME,
-  CODEX_PROVIDER_MODE,
-  GROUPS_DIR,
-  type CodexProviderMode,
-} from '../config.js';
-import { getAgentGroup } from '../db/agent-groups.js';
-import {
-  registerProviderContainerConfig,
-  type ProviderContainerContext,
-  type ProviderContainerContribution,
-} from './provider-container-registry.js';
+import { registerProviderContainerConfig } from './provider-container-registry.js';
 
-const CONTAINER_BROKER_SOCKET = '/run/nanoclaw-codex-broker.sock';
-const CONTAINER_CODEX_HOME = '/home/ubuntu/.codex';
-const CONTAINER_CODEX_HOME_DIR = '/home/ubuntu';
-const MINIMAL_CODEX_HOME_FILES = ['auth.json', 'models_cache.json'] as const;
+registerProviderContainerConfig('codex', (ctx) => {
+  const codexDir = path.join(ctx.sessionDir, 'codex');
+  fs.mkdirSync(codexDir, { recursive: true });
 
-interface CodexBrokerGrant {
-  token: string;
-  agentGroupId: string;
-  sessionId: string;
-  sessionHostPath: string;
-  groupHostPath: string;
-  defaultModel: string;
-  escalationModel: string;
-  createdAt: string;
-}
-
-function writeGrantFile(grantsDir: string, grant: CodexBrokerGrant): void {
-  fs.mkdirSync(grantsDir, { recursive: true, mode: 0o700 });
-  fs.chmodSync(grantsDir, 0o700);
-  fs.writeFileSync(path.join(grantsDir, `${grant.token}.json`), JSON.stringify(grant, null, 2) + '\n', {
-    mode: 0o600,
-  });
-}
-
-function shouldCopyFile(source: string, target: string): boolean {
-  if (!fs.existsSync(source)) return false;
-  if (!fs.existsSync(target)) return true;
-  return fs.statSync(source).mtimeMs > fs.statSync(target).mtimeMs;
-}
-
-export function prepareAgentCodexHome(sourceHome: string, agentHome: string): void {
-  fs.mkdirSync(agentHome, { recursive: true, mode: 0o700 });
-  fs.chmodSync(agentHome, 0o700);
-
-  for (const file of MINIMAL_CODEX_HOME_FILES) {
-    const source = path.join(sourceHome, file);
-    const target = path.join(agentHome, file);
-    if (path.resolve(source) === path.resolve(target) || !shouldCopyFile(source, target)) continue;
-
-    fs.copyFileSync(source, target);
-    fs.chmodSync(target, 0o600);
-  }
-}
-
-export interface CodexProviderContributionDeps {
-  mode: CodexProviderMode;
-  brokerSocket: string;
-  brokerGrantsDir: string;
-  codexHome: string;
-  agentCodexHome: string;
-  defaultModel: string;
-  escalationModel: string;
-  autoEscalation: boolean;
-  autoEscalationMinScore: number;
-  autoEscalationLongPromptChars: number;
-  socketExists: (socketPath: string) => boolean;
-  getAgentGroup: (agentGroupId: string) => { id: string; folder: string } | undefined;
-  writeGrant: (grantsDir: string, grant: CodexBrokerGrant) => void;
-  prepareAgentCodexHome: (sourceHome: string, agentHome: string) => void;
-  randomToken: () => string;
-  now: () => Date;
-}
-
-function realDeps(): CodexProviderContributionDeps {
-  return {
-    mode: CODEX_PROVIDER_MODE,
-    brokerSocket: CODEX_BROKER_SOCKET,
-    brokerGrantsDir: CODEX_BROKER_GRANTS_DIR,
-    codexHome: CODEX_HOME,
-    agentCodexHome: CODEX_AGENT_HOME,
-    defaultModel: CODEX_DEFAULT_MODEL,
-    escalationModel: CODEX_ESCALATION_MODEL,
-    autoEscalation: CODEX_AUTO_ESCALATION,
-    autoEscalationMinScore: CODEX_AUTO_ESCALATION_MIN_SCORE,
-    autoEscalationLongPromptChars: CODEX_AUTO_ESCALATION_LONG_PROMPT_CHARS,
-    socketExists: fs.existsSync,
-    getAgentGroup,
-    writeGrant: writeGrantFile,
-    prepareAgentCodexHome,
-    randomToken: () => crypto.randomBytes(32).toString('hex'),
-    now: () => new Date(),
-  };
-}
-
-export function buildCodexProviderContribution(
-  { sessionDir, agentGroupId }: ProviderContainerContext,
-  deps: CodexProviderContributionDeps = realDeps(),
-): ProviderContainerContribution {
-  if (deps.mode === 'native') {
-    deps.prepareAgentCodexHome(deps.codexHome, deps.agentCodexHome);
-
-    return {
-      mounts: [
-        { hostPath: deps.agentCodexHome, containerPath: CONTAINER_CODEX_HOME, readonly: false },
-        { hostPath: deps.agentCodexHome, containerPath: '/home/node/.codex', readonly: false },
-      ],
-      env: {
-        CODEX_PROVIDER_MODE: 'native',
-        CODEX_HOME: CONTAINER_CODEX_HOME,
-        HOME: CONTAINER_CODEX_HOME_DIR,
-        CODEX_DEFAULT_MODEL: deps.defaultModel,
-        CODEX_ESCALATION_MODEL: deps.escalationModel,
-        CODEX_AUTO_ESCALATION: String(deps.autoEscalation),
-        CODEX_AUTO_ESCALATION_MIN_SCORE: String(deps.autoEscalationMinScore),
-        CODEX_AUTO_ESCALATION_LONG_PROMPT_CHARS: String(deps.autoEscalationLongPromptChars),
-      },
-    };
+  // Copy the host's auth.json into the per-session dir if it exists.
+  // We only copy auth.json, not the full ~/.codex — config.toml would
+  // get clobbered by the container on every wake anyway.
+  const hostHome = ctx.hostEnv.HOME;
+  if (hostHome) {
+    const hostAuth = path.join(hostHome, '.codex', 'auth.json');
+    if (fs.existsSync(hostAuth)) {
+      fs.copyFileSync(hostAuth, path.join(codexDir, 'auth.json'));
+    }
   }
 
-  if (!deps.socketExists(deps.brokerSocket)) {
-    throw new Error(`Codex broker socket does not exist: ${deps.brokerSocket}`);
+  const env: Record<string, string> = {};
+  for (const key of ['OPENAI_API_KEY', 'CODEX_MODEL', 'OPENAI_BASE_URL'] as const) {
+    const value = ctx.hostEnv[key];
+    if (value) env[key] = value;
   }
-
-  const agentGroup = deps.getAgentGroup(agentGroupId);
-  if (!agentGroup) {
-    throw new Error(`Codex broker grant failed: unknown agent group ${agentGroupId}`);
-  }
-
-  const token = deps.randomToken();
-  const grant: CodexBrokerGrant = {
-    token,
-    agentGroupId,
-    sessionId: path.basename(sessionDir),
-    sessionHostPath: sessionDir,
-    groupHostPath: path.resolve(GROUPS_DIR, agentGroup.folder),
-    defaultModel: deps.defaultModel,
-    escalationModel: deps.escalationModel,
-    createdAt: deps.now().toISOString(),
-  };
-  deps.writeGrant(deps.brokerGrantsDir, grant);
 
   return {
-    mounts: [{ hostPath: deps.brokerSocket, containerPath: CONTAINER_BROKER_SOCKET, readonly: false }],
-    env: {
-      CODEX_PROVIDER_MODE: 'broker',
-      CODEX_BROKER_SOCKET: CONTAINER_BROKER_SOCKET,
-      CODEX_BROKER_TOKEN: token,
-      CODEX_DEFAULT_MODEL: deps.defaultModel,
-      CODEX_ESCALATION_MODEL: deps.escalationModel,
-      HOME: '/home/node',
-    },
+    mounts: [{ hostPath: codexDir, containerPath: '/home/node/.codex', readonly: false }],
+    env,
   };
-}
-
-registerProviderContainerConfig('codex', (ctx) => buildCodexProviderContribution(ctx));
+});

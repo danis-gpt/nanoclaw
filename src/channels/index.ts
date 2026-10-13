@@ -61,3 +61,4 @@ import './emacs.js';
 
 // deltachat (native, no Chat SDK)
 import './deltachat.js';
+import './slack-a2a-guard.js';
