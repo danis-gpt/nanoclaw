@@ -2,7 +2,7 @@ import os from 'os';
 import path from 'path';
 
 import { readEnvFile } from './env.js';
-import { getContainerImageBase, getInstallSlug } from './install-slug.js';
+import { getContainerImageBase, getDefaultContainerImage, getInstallSlug } from './install-slug.js';
 import { isValidTimezone } from './timezone.js';
 
 // Read config values from .env (falls back to process.env).
@@ -11,10 +11,9 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'CONTAINER_IMAGE',
   'CONTAINER_IMAGE_BASE',
+  'CREDENTIAL_PROXY_PORT',
   'ONECLI_URL',
   'ONECLI_API_KEY',
-  'CREDENTIAL_PROXY_PORT',
-  'TZ',
   'CODEX_DEFAULT_MODEL',
   'CODEX_ESCALATION_MODEL',
   'CODEX_PROVIDER_MODE',
@@ -23,13 +22,16 @@ const envConfig = readEnvFile([
   'CODEX_AUTO_ESCALATION',
   'CODEX_AUTO_ESCALATION_MIN_SCORE',
   'CODEX_AUTO_ESCALATION_LONG_PROMPT_CHARS',
+  'TZ',
   'DEFAULT_AGENT_PROVIDER',
+  'NANOCLAW_DEFAULT_MODEL',
+  'NANOCLAW_FAST_MODE',
   'CONTAINER_CPU_LIMIT',
   'CONTAINER_MEMORY_LIMIT',
   'CONTAINER_PIDS_LIMIT',
   'NANOCLAW_EGRESS_LOCKDOWN',
   'NANOCLAW_EGRESS_NETWORK',
-  'ONECLI_GATEWAY_CONTAINER',
+  'WEBHOOK_PORT',
 ]);
 
 /**
@@ -50,6 +52,20 @@ export const DEFAULT_AGENT_PROVIDER = (
   'claude'
 ).toLowerCase();
 
+// Instance-wide default model for agent containers, applied when the group has
+// no model of its own. Unset means the provider SDK's own default, which is
+// what every existing install gets. Unlike DEFAULT_AGENT_PROVIDER this is read
+// at spawn rather than stamped at creation, so changing it takes effect on the
+// next container start for every group that has not set one.
+export const DEFAULT_MODEL = process.env.NANOCLAW_DEFAULT_MODEL || envConfig.NANOCLAW_DEFAULT_MODEL || '';
+
+// Fast serving tier for every agent container: faster output at a higher
+// per-token price. Off unless explicitly turned on, and only by '1' or 'true' —
+// a typo must not silently start charging the faster rate.
+export const FAST_MODE = ['1', 'true'].includes(
+  (process.env.NANOCLAW_FAST_MODE || envConfig.NANOCLAW_FAST_MODE || '').toLowerCase(),
+);
+
 /**
  * @deprecated WhatsApp adapter copies now read the ASSISTANT_HAS_OWN_NUMBER
  * .env key directly. Re-export retained one release for stale adapter copies
@@ -68,6 +84,7 @@ export const SENDER_ALLOWLIST_PATH = path.join(HOME_DIR, '.config', 'nanoclaw', 
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
+export const CENTRAL_DB_PATH = path.join(DATA_DIR, 'v2.db');
 // Local agent-template library. Committed but ships empty (+ README). Resolved
 // once at load. Override to another LOCAL path via NANOCLAW_TEMPLATES_DIR; never
 // a remote URL, never an ncl flag, never runtime-mutable.
@@ -77,16 +94,13 @@ export const TEMPLATES_DIR = process.env.NANOCLAW_TEMPLATES_DIR
 
 // Per-checkout image tag so two installs on the same host don't share
 // `nanoclaw-agent:latest` and clobber each other on rebuild.
-export const CONTAINER_IMAGE_BASE =
-  process.env.CONTAINER_IMAGE_BASE || envConfig.CONTAINER_IMAGE_BASE || getContainerImageBase(PROJECT_ROOT);
-export const CONTAINER_IMAGE =
-  process.env.CONTAINER_IMAGE || envConfig.CONTAINER_IMAGE || `${CONTAINER_IMAGE_BASE}:latest`;
-// Install slug — stamped onto every spawned container via --label so
-// cleanupOrphans only reaps containers from this install, not peers.
+export const CONTAINER_IMAGE_BASE = process.env.CONTAINER_IMAGE_BASE || envConfig.CONTAINER_IMAGE_BASE || getContainerImageBase(PROJECT_ROOT);
+export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || envConfig.CONTAINER_IMAGE || getDefaultContainerImage(PROJECT_ROOT);
+// Install slug — the session key's install component, stamped onto every
+// runtime object via the canonical `nanoclaw-install` label so adoption and
+// reaping only ever see this install's sessions, not a peer's.
 export const INSTALL_SLUG = getInstallSlug(PROJECT_ROOT);
 export const CONTAINER_INSTALL_LABEL = `nanoclaw-install=${INSTALL_SLUG}`;
-export const ONECLI_URL = process.env.ONECLI_URL || envConfig.ONECLI_URL;
-export const ONECLI_API_KEY = process.env.ONECLI_API_KEY || envConfig.ONECLI_API_KEY;
 export const CREDENTIAL_PROXY_PORT = parseInt(
   process.env.CREDENTIAL_PROXY_PORT || envConfig.CREDENTIAL_PROXY_PORT || '3001',
   10,
@@ -126,6 +140,8 @@ export const MAX_MESSAGES_PER_PROMPT = Math.max(1, parseInt(process.env.MAX_MESS
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(1, parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5);
 
+export const ONECLI_URL = process.env.ONECLI_URL || envConfig.ONECLI_URL;
+export const ONECLI_API_KEY = process.env.ONECLI_API_KEY || envConfig.ONECLI_API_KEY;
 // Per-container resource caps, passed through to `docker run`. Default empty =
 // no flag added = today's unbounded behavior (don't OOM existing OSS workloads).
 // Operators opt in: CONTAINER_CPU_LIMIT=2, CONTAINER_MEMORY_LIMIT=8g.
@@ -139,13 +155,21 @@ export const CONTAINER_MEMORY_LIMIT = process.env.CONTAINER_MEMORY_LIMIT || envC
 // Empty = no cap.
 export const CONTAINER_PIDS_LIMIT = process.env.CONTAINER_PIDS_LIMIT ?? envConfig.CONTAINER_PIDS_LIMIT ?? '2048';
 
-// Egress lockdown — force all agent traffic through the OneCLI gateway on a
+// Egress lockdown — force all agent traffic through the selected gateway on a
 // no-internet Docker network. Off by default; consumed by src/egress-lockdown.ts.
 export const EGRESS_LOCKDOWN = (process.env.NANOCLAW_EGRESS_LOCKDOWN || envConfig.NANOCLAW_EGRESS_LOCKDOWN) === 'true';
 export const EGRESS_NETWORK =
   process.env.NANOCLAW_EGRESS_NETWORK || envConfig.NANOCLAW_EGRESS_NETWORK || 'nanoclaw-egress';
-export const ONECLI_GATEWAY_CONTAINER =
-  process.env.ONECLI_GATEWAY_CONTAINER || envConfig.ONECLI_GATEWAY_CONTAINER || 'onecli';
+
+// Resolve when the listener starts so a late process override still wins.
+export function getWebhookPort(): number {
+  const raw = process.env.WEBHOOK_PORT || envConfig.WEBHOOK_PORT || '3000';
+  const port = Number(raw);
+  if (!/^[1-9]\d*$/.test(raw) || !Number.isInteger(port) || port > 65_535) {
+    throw new Error(`Invalid WEBHOOK_PORT ${JSON.stringify(raw)}: expected an integer from 1 to 65535`);
+  }
+  return port;
+}
 
 // Timezone for scheduled tasks, message formatting, etc.
 // Validates each candidate is a real IANA identifier before accepting.

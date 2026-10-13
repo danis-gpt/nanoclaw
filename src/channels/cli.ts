@@ -13,7 +13,9 @@
  *     { "text": "user message" }                          # default — talk to cli/local
  *     { "text": "...", "to": {"channelType": "discord",
  *                             "platformId": "discord:@me:149...",
- *                             "threadId": null} }         # route to a specific mg
+ *                             "threadId": null,
+ *                             "instance": "discord"} }    # route to a specific mg
+ *                                                         # (instance optional; default = channelType)
  *     { "text": "...", "to": {...}, "reply_to": {...} }   # + redirect replies
  *   Server → client:
  *     { "text": "agent reply" }
@@ -47,7 +49,7 @@ import type {
   InboundEvent,
   OutboundMessage,
 } from './adapter.js';
-import { registerChannelAdapter } from './channel-registry.js';
+import { INSTANCE_KEY_RE, registerChannelAdapter } from './channel-registry.js';
 
 const PLATFORM_ID = 'local';
 
@@ -84,7 +86,6 @@ function createAdapter(): ChannelAdapter {
       // file behind, and net.createServer refuses to bind to an existing path.
       try {
         fs.unlinkSync(sock);
-        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch (err) {
         const e = err as NodeJS.ErrnoException;
         if (e.code !== 'ENOENT') {
@@ -101,7 +102,6 @@ function createAdapter(): ChannelAdapter {
           // users can't send into this agent.
           try {
             fs.chmodSync(sock, 0o600);
-            // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
           } catch (err) {
             log.warn('Failed to chmod CLI socket (continuing)', { sock, err });
           }
@@ -115,7 +115,6 @@ function createAdapter(): ChannelAdapter {
       if (client) {
         try {
           client.end();
-          // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
         } catch {
           // swallow — teardown is best-effort
         }
@@ -130,7 +129,6 @@ function createAdapter(): ChannelAdapter {
       // Remove the socket file so a relaunch doesn't trip over it.
       try {
         fs.unlinkSync(socketPath());
-        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch {
         // swallow
       }
@@ -152,7 +150,6 @@ function createAdapter(): ChannelAdapter {
       if (text === null) return undefined;
       try {
         client.write(JSON.stringify({ text }) + '\n');
-        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch (err) {
         log.warn('Failed to write to CLI client', { err });
       }
@@ -173,7 +170,6 @@ function createAdapter(): ChannelAdapter {
         try {
           client.write(JSON.stringify({ text: '[superseded by a newer client]' }) + '\n');
           client.end();
-          // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
         } catch {
           // swallow
         }
@@ -214,8 +210,7 @@ function createAdapter(): ChannelAdapter {
     };
     try {
       payload = JSON.parse(line);
-    } catch (err) {
-      if (!(err instanceof SyntaxError)) throw err;
+    } catch (_err) {
       log.warn('CLI: ignoring non-JSON line from client', { line });
       return;
     }
@@ -230,6 +225,7 @@ function createAdapter(): ChannelAdapter {
       // Does NOT claim the chat slot, so an active terminal chat isn't evicted.
       const event: InboundEvent = {
         channelType: to.channelType,
+        instance: to.instance,
         platformId: to.platformId,
         threadId: to.threadId,
         message: {
@@ -246,7 +242,6 @@ function createAdapter(): ChannelAdapter {
       };
       try {
         await config.onInboundEvent(event);
-        // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
       } catch (err) {
         log.error('CLI: onInboundEvent threw', { err });
       }
@@ -267,13 +262,12 @@ function createAdapter(): ChannelAdapter {
           senderId: `cli:${PLATFORM_ID}`,
         },
       });
-      // eslint-disable-next-line no-catch-all/no-catch-all -- the channel boundary handles and reports this failure
     } catch (err) {
       log.error('CLI: onInbound threw', { err });
     }
   }
 
-  function parseAddress(raw: unknown): DeliveryAddress | null {
+  function parseAddress(raw: unknown): (DeliveryAddress & { instance?: string }) | null {
     if (!raw || typeof raw !== 'object') return null;
     const obj = raw as Record<string, unknown>;
     if (typeof obj.channelType !== 'string' || typeof obj.platformId !== 'string') return null;
@@ -283,10 +277,21 @@ function createAdapter(): ChannelAdapter {
         : typeof obj.threadId === 'string'
           ? obj.threadId
           : null;
+    // Anything that is not a registry key resolves as the default instance;
+    // fail closed, but loudly, so a typo in `to.instance` is visible in the log.
+    let instance: string | undefined;
+    if (typeof obj.instance === 'string') {
+      if (INSTANCE_KEY_RE.test(obj.instance)) {
+        instance = obj.instance;
+      } else {
+        log.warn('CLI: ignoring non-URL-safe to.instance, routing to the default instance', { instance: obj.instance });
+      }
+    }
     return {
       channelType: obj.channelType,
       platformId: obj.platformId,
       threadId,
+      instance,
     };
   }
 
