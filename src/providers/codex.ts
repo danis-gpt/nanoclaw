@@ -26,6 +26,8 @@
  * native SessionStart hook and reports completed exchanges for the declared
  * archive plan.
  */
+import { CODEX_PROVIDER_MODE, CODEX_USE_LOCAL_BROKER } from '../config.js';
+import { buildCodexProviderContribution } from './codex-native.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -37,7 +39,16 @@ import { registerProviderContainerConfig } from './provider-container-registry.j
 
 registerProviderContainerConfig(
   'codex',
-  async (ctx) => {
+    async (ctx) => {
+        if (CODEX_PROVIDER_MODE === 'native' || CODEX_USE_LOCAL_BROKER) {
+      const group = await getAgentGroup(ctx.agentGroupId);
+      if (!group) throw new Error('Native Codex group not found');
+      await composeGroupAgentsMd(group, ctx.groupDir);
+      syncCodexSkillLinks(ctx.groupDir, ctx.selectedSkills);
+      materializeTemplateSkills(ctx.agentGroupId, path.join(ctx.groupDir, '.agents', 'skills'));
+      const contribution = buildCodexProviderContribution(ctx);
+      return { ...contribution, mounts: [...(contribution.mounts ?? []), { hostPath: path.join(ctx.groupDir, 'AGENTS.md'), containerPath: '/workspace/agent/AGENTS.md', readonly: true }, { hostPath: path.join(ctx.groupDir, '.agents'), containerPath: '/home/ubuntu/.agents', readonly: true }] };
+    }
     const coreOwnsProviderSurfaces = (ctx as typeof ctx & { coreOwnsProviderSurfaces?: true }).coreOwnsProviderSurfaces;
     if (coreOwnsProviderSurfaces) return {};
 
