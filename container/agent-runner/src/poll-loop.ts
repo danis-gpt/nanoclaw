@@ -235,7 +235,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     }
     // MODULE-HOOK:scheduling-pre-task:end
 
-        if (keep.length === 0) {
+            if (keep.length === 0) {
       log(`All ${normalMessages.length} non-command message(s) gated by script, skipping query`);
       idle.markActivity();
       continue;

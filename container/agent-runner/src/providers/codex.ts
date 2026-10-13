@@ -1,3 +1,4 @@
+import { CodexProvider as NativeCodexProvider } from './codex-native.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -465,5 +466,5 @@ function listGeneratedImages(threadId: string): Set<string> {
 // argument; a pre-contract core passes nothing there.
 registerProvider(
   'codex',
-  (opts, configuration?: CodexResolvedConfiguration) => new CodexProvider(opts, defaultCodexRuntimeDeps, configuration),
+  (opts, configuration?: CodexResolvedConfiguration) => (opts?.env?.CODEX_PROVIDER_MODE || process.env.CODEX_PROVIDER_MODE) === 'native' ? new NativeCodexProvider(opts) : new CodexProvider(opts, defaultCodexRuntimeDeps, configuration),
 );
