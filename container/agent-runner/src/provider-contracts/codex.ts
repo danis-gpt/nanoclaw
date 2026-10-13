@@ -50,7 +50,7 @@ export const codexRuntimeContract: ProviderRuntimeContract & {
 
 // Two-step registration: providers/codex.ts registered the factory; this
 // attaches the contract. Order-independent, and neither file imports the other.
-registerProviderContract(provider, codexRuntimeContract);
+if (process.env.CODEX_PROVIDER_MODE !== 'native') registerProviderContract(provider, codexRuntimeContract);
 
 function writeCodexRuntimeFiles(inputs: Partial<RuntimeConfigurationInputs>): void {
   const hook = inputs.memory as CodexMemorySessionHook | undefined;
