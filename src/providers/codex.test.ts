@@ -4,7 +4,11 @@ import path from 'path';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { buildCodexProviderContribution, prepareAgentCodexHome, type CodexProviderContributionDeps } from './codex-native.js';
+import {
+  buildCodexProviderContribution,
+  prepareAgentCodexHome,
+  type CodexProviderContributionDeps,
+} from './codex-native.js';
 
 const baseDeps = {
   mode: 'broker',

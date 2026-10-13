@@ -162,7 +162,10 @@ export class DockerSessionDriver implements SessionDriver {
       }
       created.push(name);
       this.#cli.run(
-        containerCreateArgs(spec, agent, name, [...(this.#cli.bin === 'podman' ? ['--userns', 'keep-id'] : []), ...(privateNetwork ? ['--network', privateNetwork] : networkArgs)]),
+        containerCreateArgs(spec, agent, name, [
+          ...(this.#cli.bin === 'podman' ? ['--userns', 'keep-id'] : []),
+          ...(privateNetwork ? ['--network', privateNetwork] : networkArgs),
+        ]),
       );
     } catch (error) {
       for (const createdName of created.reverse()) {

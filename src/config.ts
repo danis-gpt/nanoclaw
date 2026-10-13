@@ -94,8 +94,10 @@ export const TEMPLATES_DIR = process.env.NANOCLAW_TEMPLATES_DIR
 
 // Per-checkout image tag so two installs on the same host don't share
 // `nanoclaw-agent:latest` and clobber each other on rebuild.
-export const CONTAINER_IMAGE_BASE = process.env.CONTAINER_IMAGE_BASE || envConfig.CONTAINER_IMAGE_BASE || getContainerImageBase(PROJECT_ROOT);
-export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || envConfig.CONTAINER_IMAGE || getDefaultContainerImage(PROJECT_ROOT);
+export const CONTAINER_IMAGE_BASE =
+  process.env.CONTAINER_IMAGE_BASE || envConfig.CONTAINER_IMAGE_BASE || getContainerImageBase(PROJECT_ROOT);
+export const CONTAINER_IMAGE =
+  process.env.CONTAINER_IMAGE || envConfig.CONTAINER_IMAGE || getDefaultContainerImage(PROJECT_ROOT);
 // Install slug — the session key's install component, stamped onto every
 // runtime object via the canonical `nanoclaw-install` label so adoption and
 // reaping only ever see this install's sessions, not a peer's.

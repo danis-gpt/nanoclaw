@@ -14,4 +14,5 @@
 
 /** The container runtime binary name. */
 import { readEnvFile } from './env.js';
-export const CONTAINER_RUNTIME_BIN = process.env.CONTAINER_RUNTIME || readEnvFile(['CONTAINER_RUNTIME']).CONTAINER_RUNTIME || 'docker';
+export const CONTAINER_RUNTIME_BIN =
+  process.env.CONTAINER_RUNTIME || readEnvFile(['CONTAINER_RUNTIME']).CONTAINER_RUNTIME || 'docker';
