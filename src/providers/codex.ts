@@ -26,6 +26,8 @@
  * native SessionStart hook and reports completed exchanges for the declared
  * archive plan.
  */
+import { CODEX_PROVIDER_MODE } from '../config.js';
+import { buildCodexProviderContribution } from './codex-native.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -38,6 +40,7 @@ import { registerProviderContainerConfig } from './provider-container-registry.j
 registerProviderContainerConfig(
   'codex',
   async (ctx) => {
+    if (CODEX_PROVIDER_MODE === 'native') return buildCodexProviderContribution(ctx);
     const coreOwnsProviderSurfaces = (ctx as typeof ctx & { coreOwnsProviderSurfaces?: true }).coreOwnsProviderSurfaces;
     if (coreOwnsProviderSurfaces) return {};
 
