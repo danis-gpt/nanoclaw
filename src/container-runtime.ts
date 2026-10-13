@@ -13,4 +13,5 @@
  */
 
 /** The container runtime binary name. */
-export const CONTAINER_RUNTIME_BIN = 'podman';
+import { readEnvFile } from './env.js';
+export const CONTAINER_RUNTIME_BIN = process.env.CONTAINER_RUNTIME || readEnvFile(['CONTAINER_RUNTIME']).CONTAINER_RUNTIME || 'docker';

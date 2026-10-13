@@ -52,6 +52,7 @@ describe('script-skip ack chain (container leg)', () => {
       const result = await runScript(
         `printf '{"wakeAgent":true,"data":'; cat probe.json; printf '}'`,
         't-relative',
+        undefined,
         workspace,
       );
       expect(result).toEqual({ wakeAgent: true, data: { source: 'agent-workspace' } });

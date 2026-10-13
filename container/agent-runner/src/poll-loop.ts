@@ -236,8 +236,8 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // MODULE-HOOK:scheduling-pre-task:end
 
     if (keep.length === 0) {
-      idle.markActivity();
       log(`All ${normalMessages.length} non-command message(s) gated by script, skipping query`);
+      idle.markActivity();
       continue;
     }
 
@@ -957,7 +957,7 @@ export async function deliverMidTurnBlocks(
       log(`Mid-turn <message to="${toName}"> is a verbatim repeat of a message already sent this turn — skipped`);
       continue;
     }
-    await sendToDestination(dest, body, routing, sent === 0 ? options?.files : []);
+    await sendToDestination(dest, body, routing);
     delivered++;
     log(`Mid-turn delivery: <message to="${toName}"> (${body.length} chars)`);
   }
@@ -1166,6 +1166,12 @@ export async function dispatchResultText(
   // With suppressDelivery the delivered-this-turn question is answered by
   // turnDelivered (door deliveries + DB-visible sends like MCP send_message);
   // otherwise by this dispatch's own send count.
+  if (!routing.taskRun && sent === 0 && options?.files?.length && routing.platformId && routing.channelType) {
+    const id = generateId();
+    const filenames = writeOutboxFiles(id, options.files);
+    await writeMessageOut({ id, in_reply_to: routing.inReplyTo, kind: 'chat', platform_id: routing.platformId, channel_type: routing.channelType, thread_id: routing.threadId, content: JSON.stringify(buildContent(scratchpad, filenames)) });
+    sent = 1;
+  }
   const anythingDelivered = options?.suppressDelivery ? options.turnDelivered === true : sent > 0;
   const hasUnwrapped = !routing.taskRun && !anythingDelivered && !!scratchpad;
   if (hasUnwrapped) {

@@ -1,3 +1,4 @@
+vi.mock('./image-pins.js', () => ({ reconcileImagePins: vi.fn() }));
 import { afterEach, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
