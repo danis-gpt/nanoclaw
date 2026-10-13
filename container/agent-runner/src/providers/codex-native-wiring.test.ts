@@ -5,7 +5,9 @@ import '../provider-contracts/index.js';
 import { createProvider } from './factory.js';
 import { CodexProvider as NativeCodexProvider } from './codex-native.js';
 
-test('the installed Codex factory preserves the explicitly configured native lane', () => {
-  const provider = createProvider('codex', { env: { CODEX_PROVIDER_MODE: 'native' } });
-  expect(provider).toBeInstanceOf(NativeCodexProvider);
-});
+for (const mode of ['native', 'broker']) {
+  test(`the installed Codex factory preserves the explicitly configured ${mode} lane`, () => {
+    const provider = createProvider('codex', { env: { CODEX_PROVIDER_MODE: mode } });
+    expect(provider).toBeInstanceOf(NativeCodexProvider);
+  });
+}

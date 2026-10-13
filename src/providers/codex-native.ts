@@ -16,9 +16,7 @@ import {
   GROUPS_DIR,
   type CodexProviderMode,
 } from '../config.js';
-import { getAgentGroup } from '../db/agent-groups.js';
 import {
-  registerProviderContainerConfig,
   type ProviderContainerContext,
   type ProviderContainerContribution,
 } from './provider-container-registry.js';
@@ -86,7 +84,7 @@ export interface CodexProviderContributionDeps {
   now: () => Date;
 }
 
-function realDeps(): CodexProviderContributionDeps {
+function realDeps(ctx: ProviderContainerContext): CodexProviderContributionDeps {
   return {
     mode: CODEX_PROVIDER_MODE,
     brokerSocket: CODEX_BROKER_SOCKET,
@@ -99,7 +97,7 @@ function realDeps(): CodexProviderContributionDeps {
     autoEscalationMinScore: CODEX_AUTO_ESCALATION_MIN_SCORE,
     autoEscalationLongPromptChars: CODEX_AUTO_ESCALATION_LONG_PROMPT_CHARS,
     socketExists: fs.existsSync,
-    getAgentGroup: () => { throw new Error('Broker contribution requires an async lookup'); },
+    getAgentGroup: (id) => id === ctx.agentGroupId ? { id, folder: path.basename(ctx.groupDir) } : undefined,
     writeGrant: writeGrantFile,
     prepareAgentCodexHome,
     randomToken: () => crypto.randomBytes(32).toString('hex'),
@@ -108,9 +106,10 @@ function realDeps(): CodexProviderContributionDeps {
 }
 
 export function buildCodexProviderContribution(
-  { sessionDir, agentGroupId }: ProviderContainerContext,
-  deps: CodexProviderContributionDeps = realDeps(),
+  ctx: ProviderContainerContext,
+  deps: CodexProviderContributionDeps = realDeps(ctx),
 ): ProviderContainerContribution {
+  const { sessionDir, agentGroupId } = ctx;
   if (deps.mode === 'native') {
     deps.prepareAgentCodexHome(deps.codexHome, deps.agentCodexHome);
 
