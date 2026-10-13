@@ -315,6 +315,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
 
     // Ensure completed even if processQuery ended without a result event
     // (e.g. stream closed unexpectedly).
+    idle.markActivity();
     markCompleted(processingIds);
     log(`Completed ${ids.length} message(s)`);
   }

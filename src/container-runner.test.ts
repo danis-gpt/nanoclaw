@@ -1,3 +1,4 @@
+import { ensureAgentGroupImage } from './container-runner.js';
 /**
  * container-runner — composition and lifecycle policy.
  *
@@ -576,3 +577,36 @@ describe('syncSkillSymlinks', () => {
     expect(fs.readdirSync(hostDir).sort()).toEqual(['stale-link']);
   });
 });
+
+describe('ensureAgentGroupImage', () => {
+  it('rebuilds a missing configured image before spawn', async () => {
+    const rebuilt: string[] = [];
+    await ensureAgentGroupImage(
+      'ag-a',
+      { imageTag: 'localhost/nanoclaw-agent:ag-a', packages: { apt: ['python3'], npm: [] } },
+      {
+        imageExists: async () => false,
+        rebuild: async (agentGroupId) => {
+          rebuilt.push(agentGroupId);
+        },
+      },
+    );
+    expect(rebuilt).toEqual(['ag-a']);
+  });
+
+  it('does not rebuild an existing configured image', async () => {
+    let rebuilds = 0;
+    await ensureAgentGroupImage(
+      'ag-a',
+      { imageTag: 'localhost/nanoclaw-agent:ag-a', packages: { apt: ['python3'], npm: [] } },
+      {
+        imageExists: async () => true,
+        rebuild: async () => {
+          rebuilds += 1;
+        },
+      },
+    );
+    expect(rebuilds).toBe(0);
+  });
+});
+
