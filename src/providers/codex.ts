@@ -26,7 +26,7 @@
  * native SessionStart hook and reports completed exchanges for the declared
  * archive plan.
  */
-import { CODEX_PROVIDER_MODE } from '../config.js';
+import { CODEX_PROVIDER_MODE, CODEX_USE_LOCAL_BROKER } from '../config.js';
 import { buildCodexProviderContribution } from './codex-native.js';
 import fs from 'fs';
 import path from 'path';
@@ -40,7 +40,7 @@ import { registerProviderContainerConfig } from './provider-container-registry.j
 registerProviderContainerConfig(
   'codex',
     async (ctx) => {
-        if (CODEX_PROVIDER_MODE === 'native') {
+        if (CODEX_PROVIDER_MODE === 'native' || CODEX_USE_LOCAL_BROKER) {
       const group = await getAgentGroup(ctx.agentGroupId);
       if (!group) throw new Error('Native Codex group not found');
       await composeGroupAgentsMd(group, ctx.groupDir);

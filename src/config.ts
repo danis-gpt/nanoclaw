@@ -115,6 +115,7 @@ export const CODEX_PROVIDER_MODE: CodexProviderMode =
   (process.env.CODEX_PROVIDER_MODE || envConfig.CODEX_PROVIDER_MODE || '').toLowerCase() === 'native'
     ? 'native'
     : 'broker';
+export const CODEX_USE_LOCAL_BROKER = (process.env.CODEX_PROVIDER_MODE || envConfig.CODEX_PROVIDER_MODE || '').toLowerCase() === 'broker';
 export const CODEX_HOME = process.env.CODEX_HOME || envConfig.CODEX_HOME || path.join(HOME_DIR, '.codex');
 export const CODEX_AGENT_HOME =
   process.env.CODEX_AGENT_HOME || envConfig.CODEX_AGENT_HOME || path.join(DATA_DIR, 'codex-agent-home');
