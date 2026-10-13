@@ -1,10 +1,11 @@
+import { CODEX_PROVIDER_MODE, CODEX_USE_LOCAL_BROKER } from '../config.js';
 import { CODEX_PROJECT_DOC_MAX_BYTES } from '../providers/codex-agents-md.js';
 
 import { registerProviderHostContract } from './registry.js';
 
 const HOST_SEAM_VERSION = 1;
 
-registerProviderHostContract('codex', {
+if (CODEX_PROVIDER_MODE !== 'native' && !CODEX_USE_LOCAL_BROKER) registerProviderHostContract('codex', {
   modelEndpoints: {
     api: 'https://api.openai.com',
     subscription: 'https://chatgpt.com',
