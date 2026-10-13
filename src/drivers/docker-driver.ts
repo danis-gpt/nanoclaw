@@ -657,6 +657,8 @@ export function dockerStatePhase(state: string): SessionPhase {
 interface DockerEventDoc {
   Action?: string;
   Actor?: { Attributes?: Record<string, string> };
+  Attributes?: Record<string, string>;
+  Status?: string;
 }
 
 /**
@@ -665,14 +667,16 @@ interface DockerEventDoc {
  * Unknown actions and label-less events are dropped — hints may drop.
  */
 export function dockerEventToSessionEvent(doc: unknown, installSlug: string): SessionEvent | null {
+  if (!doc || typeof doc !== 'object') return null;
   const event = doc as DockerEventDoc;
-  const attrs = event.Actor?.Attributes ?? {};
+  const attrs = event.Actor?.Attributes ?? event.Attributes ?? {};
+  if (attrs[LABELS.install] && attrs[LABELS.install] !== installSlug) return null;
   const agentGroupId = attrs[LABELS.group];
   const sessionId = attrs[LABELS.session];
   if (!agentGroupId || !sessionId) return null;
-  const action = event.Action ?? '';
+  const action = event.Action ?? event.Status ?? '';
   const kind =
-    action === 'die' || action === 'destroy'
+    action === 'die' || action === 'destroy' || action === 'died' || action === 'remove'
       ? ('terminal' as const)
       : action === 'create' || action === 'start' || action === 'restart'
         ? ('phase' as const)
