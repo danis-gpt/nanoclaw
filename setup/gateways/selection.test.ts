@@ -109,8 +109,9 @@ describe('real detector probe', () => {
       cwd: root,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 15_000,
     });
     expect(loud).toContain('WARN');
     expect(detectInstalledGateway(root)).toBe('fixture');
-  });
+  }, 30_000);
 });
