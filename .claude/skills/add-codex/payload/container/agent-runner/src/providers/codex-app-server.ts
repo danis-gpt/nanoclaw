@@ -131,10 +131,18 @@ export interface TurnParams {
   cwd?: string;
 }
 
-export function spawnCodexAppServer(): AppServer {
+export function codexAppServerArgs(cwd: string): string[] {
+  const args: string[] = [...CODEX_APP_SERVER_ARGS];
+  if (fs.existsSync(path.join(cwd, '.codex-apps-disabled'))) {
+    args.unshift('--disable', 'apps', '--disable', 'plugins');
+  }
+  return args;
+}
+
+export function spawnCodexAppServer(cwd = process.cwd()): AppServer {
   // NanoClaw generates the hook config and has no interactive user available
   // to approve hook trust inside the container.
-  const args = [...CODEX_APP_SERVER_ARGS];
+  const args = codexAppServerArgs(cwd);
   log(`Spawning: codex ${args.join(' ')}`);
 
   const proc = spawn('codex', args, {

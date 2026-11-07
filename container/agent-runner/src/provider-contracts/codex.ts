@@ -8,9 +8,9 @@ import {
   type CodexMemorySessionHook,
   writeCodexConfigToml,
 } from '../providers/codex-app-server.js';
-import { archiveProviderExchange } from '../providers/exchange-archive.js';
 import { registerProviderContract } from '../providers/provider-registry.js';
 
+import { archiveProviderExchange } from './exchange-archive.js';
 import {
   type ProviderRuntimeContract,
   type RuntimeAfterExchangeInput,
@@ -50,7 +50,7 @@ export const codexRuntimeContract: ProviderRuntimeContract & {
 
 // Two-step registration: providers/codex.ts registered the factory; this
 // attaches the contract. Order-independent, and neither file imports the other.
-if (!['native', 'broker'].includes(process.env.CODEX_PROVIDER_MODE || '')) registerProviderContract(provider, codexRuntimeContract);
+registerProviderContract(provider, codexRuntimeContract);
 
 function writeCodexRuntimeFiles(inputs: Partial<RuntimeConfigurationInputs>): void {
   const hook = inputs.memory as CodexMemorySessionHook | undefined;

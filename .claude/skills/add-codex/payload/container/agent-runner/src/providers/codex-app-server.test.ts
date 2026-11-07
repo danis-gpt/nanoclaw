@@ -6,6 +6,7 @@ import path from 'path';
 import {
   type AppServer,
   CODEX_APP_SERVER_ARGS,
+  codexAppServerArgs,
   attachCodexAutoApproval,
   buildCodexConfigPlan,
   buildCodexProcessEnv,
@@ -540,3 +541,24 @@ function autoRespondingServer(errors: Record<string, string> = {}): {
   } as unknown as AppServer;
   return { server, requests };
 }
+
+describe('Codex workspace app policy', () => {
+  it('keeps the stock launch unchanged without an operator marker', () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-policy-'));
+    try {
+      expect(codexAppServerArgs(cwd)).toEqual([...CODEX_APP_SERVER_ARGS]);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('disables both apps and plugins in a restricted workspace', () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-policy-'));
+    try {
+      fs.writeFileSync(path.join(cwd, '.codex-apps-disabled'), '');
+      expect(codexAppServerArgs(cwd)).toEqual(['--disable', 'apps', '--disable', 'plugins', ...CODEX_APP_SERVER_ARGS]);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});

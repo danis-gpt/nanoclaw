@@ -410,10 +410,7 @@ async function spawnContainer(session: Session): Promise<void> {
     capabilities: driver.capabilities(),
   });
   const admissionGeneration = gatewayAdmissionGeneration;
-  const gateway =
-    provider === 'codex' && ['native', 'broker'].includes(contribution?.env?.CODEX_PROVIDER_MODE || '')
-      ? { ...gatewaySession.lease.contribution, mounts: [], env: {} }
-      : gatewaySession.lease.contribution;
+  const gateway = gatewaySession.lease.contribution;
   let spec: SessionSpec;
   let claimIncarnation: number | null = null;
   try {

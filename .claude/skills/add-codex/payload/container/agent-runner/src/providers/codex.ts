@@ -167,7 +167,7 @@ export class CodexProvider implements AgentProvider {
       if (!codexRuntimeOwnership.contractOwnsRuntimeFiles) {
         self.runtime.writeCodexConfigToml(self.mcpServers, memorySessionHook, self.inference);
       }
-      const server = self.runtime.spawnCodexAppServer();
+      const server = self.runtime.spawnCodexAppServer(input.cwd);
       activeServer = server;
       self.runtime.attachCodexAutoApproval(server);
 

@@ -44,6 +44,18 @@ async function runQueryToHandshake(provider: CodexProvider): Promise<void> {
 }
 
 describe('CodexProvider', () => {
+  it('uses the query workspace when resolving the operator app policy', async () => {
+    const { runtime } = recordingRuntime();
+    const spawn = runtime.spawnCodexAppServer;
+    const workspaces: Array<string | undefined> = [];
+    runtime.spawnCodexAppServer = (cwd) => {
+      workspaces.push(cwd);
+      return spawn(cwd);
+    };
+    await runQueryToHandshake(new CodexProvider({}, runtime));
+    expect(workspaces).toEqual(['/workspace/agent']);
+  });
+
   it('rejects unsupported reasoning effort values', () => {
     expect(() => new CodexProvider({ effort: 'max' })).toThrow(/Unsupported Codex reasoning effort/);
   });
