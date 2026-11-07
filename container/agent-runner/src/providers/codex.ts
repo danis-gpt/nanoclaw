@@ -289,6 +289,14 @@ async function* runOneTurn(
     const params = n.params ?? {};
     buffer.push({ type: 'activity' });
 
+    // Codex also streams every sub-agent thread it spawns on this connection.
+    // Their work keeps the turn alive, but only this thread's events may
+    // retarget, fill or end it.
+    if (typeof params.threadId === 'string' && params.threadId !== threadId) {
+      kick();
+      return;
+    }
+
     switch (method) {
       case 'thread/started': {
         const thread = params.thread as { id?: string } | undefined;
@@ -324,6 +332,12 @@ async function* runOneTurn(
       case 'error': {
         const err = params.error as { message?: string; additionalDetails?: string | null } | undefined;
         const msg = [err?.message, err?.additionalDetails].filter(Boolean).join(': ') || 'Codex turn failed';
+        // willRetry: Codex retries a transient stream error itself and the
+        // turn goes on, so it must not end the turn.
+        if (params.willRetry === true) {
+          buffer.push({ type: 'progress', message: `Codex retrying: ${msg}` });
+          break;
+        }
         state.error = new Error(msg);
         finishTurn();
         break;

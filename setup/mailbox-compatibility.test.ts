@@ -31,10 +31,10 @@ describe('standalone setup mailbox composition', () => {
         '--eval',
         "const { run } = await import('./setup/register.ts'); const { getAgentMailbox } = await import('./src/mailbox/index.ts'); const { SqliteAgentMailbox } = await import('./src/mailbox/sqlite/index.ts'); console.log(`${typeof run}:${getAgentMailbox() instanceof SqliteAgentMailbox}`);",
       ],
-      { cwd: repoRoot, encoding: 'utf8' },
+      { cwd: repoRoot, encoding: 'utf8', timeout: 15_000 },
     );
 
     expect(result.status).toBe(0);
     expect(result.stdout.trim()).toBe('function:true');
-  });
+  }, 20_000);
 });
